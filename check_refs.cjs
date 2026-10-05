@@ -6,12 +6,15 @@ const pairs = [
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
-  ['ST.calib', 84], ['ST.mapTiles', 14], ['ST.calibMsg', 19], ['ST.progRev', 5],
+  ['ST.calib', 89], ['ST.mapTiles', 14], ['ST.calibMsg', 19], ['ST.progRev', 5],
   ['runCalibrate', 2], ['fullScan', 5], ['scoreOffset', 2], ['canvasPixelAt', 7],
   ['applyCalibToStorage', 3], ['clearCalib', 5], ['refreshCalibStats', 3],
   ['parseTileUrl', 2], ['decodeTile', 3], ['storeMapTile', 2], ['patchFetch', 2],
   ['isPainted', 3], ['sameColor', 2], ['texPxMerc', 3],
-  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 4], ['WORLD_PX', 48],
+  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 48],
+  // v2.5.5 容差匹配 + 三档守门 + 强制采纳
+  ['palTolHit', 5], ['nearestPaletteCached', 2], ['calibSignificant', 3],
+  ['acceptCalib', 3], ['ST.calibForce', 5], ['NEAREST_MAP', 5], ['PAL_TOL', 6],
   // v2.5.3 快查网格 + 阶梯搜索 + 假峰守门
   ['paintIdxMap', 4], ['gridAt', 3], ['fillGridTile', 2], ['ensurePaintGrid', 3],
   ['scoreBatch', 5], ['calibSearchPhases', 2], ['refineAndFinish', 2],

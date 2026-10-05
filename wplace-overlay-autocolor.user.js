@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.5.4
+// @version      2.5.5
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
 // @author       you
@@ -160,6 +160,7 @@
     calib: null,        // 校准结果 {tplId,dwx,dwy,dmx,dmy,match,total,done,wrong,missing,baseColors,t,stale}
     calibBusy: false,
     calibMsg: null,     // 校准结果文案（HUD 显示）
+    calibForce: null,   // 守门拒绝时缓存的最高候选 {t,tplId,best,stat,mFull,editMode}——2 分钟内再点「🎯 校准」= 强制采纳
     progRev: 0,         // 校准状态图版本号
     tileFetching: {},   // 主动补抓去重 {"x,y": true}
     liveTpls: [],       // 编辑中模板的虚拟条目（syncLiveTemplates/syncEditOverlay 维护，不写 localStorage）
@@ -609,6 +610,18 @@
     if (x < 0 || y < 0 || x >= G.gw || y >= G.gh) return 0;
     return G.grid[y * G.gw + x];
   }
+  // 网格编码：0=未涂/无数据；1..63=已涂且精确=调色板色；129..191=已涂非调色板色
+  // （128+最近调色板索引）；255=预留兜底。近似编码让「画手用了相邻色/画布压缩伪影」
+  // 不再被逐字节精确比较打成画错——实测用户场景真峰仅 40% 全因近似色拉低。
+  var NEAREST_MAP = null;
+  function nearestPaletteCached(r, g, b) {
+    if (!NEAREST_MAP) NEAREST_MAP = new Map();
+    var k = (r << 16) | (g << 8) | b, v = NEAREST_MAP.get(k);
+    if (v) return v;
+    v = nearestPaletteIdx(r, g, b);
+    NEAREST_MAP.set(k, v);
+    return v;
+  }
   function fillGridTile(G, t, im) {
     var bx = t.x * TILE_PX - G.gx0, by = t.y * TILE_PX - G.gy0, painted = 0;
     for (var y = 0; y < t.h; y++) {
@@ -616,11 +629,29 @@
       for (var x = 0; x < t.w; x++) {
         var o = ro + x * 4;
         if (t.data[o + 3] < 128) continue;
-        G.grid[gi + x] = im.get((t.data[o] << 16) | (t.data[o + 1] << 8) | t.data[o + 2]) || 255;
+        G.grid[gi + x] = im.get((t.data[o] << 16) | (t.data[o + 1] << 8) | t.data[o + 2]) ||
+          (128 + nearestPaletteCached(t.data[o], t.data[o + 1], t.data[o + 2]));
         painted++;
       }
     }
     G.painted += painted;
+  }
+  // 颜色容差表（64×64）：调色板色对 RGB 距离² ≤1600（40²）视为近似。近似命中参与
+  // 匹配率（真峰分数实打实提升；随机背景的近似命中率涨幅远小于真峰）。
+  var PAL_TOL = null;
+  function palTolHit(a, b) {
+    if (!PAL_TOL) {
+      PAL_TOL = new Uint8Array(64 * 64);
+      for (var i = 1; i < PALETTE.length; i++) {
+        for (var j = 1; j < PALETTE.length; j++) {
+          if (i === j) { PAL_TOL[i * 64 + j] = 1; continue; }
+          var c1 = PALETTE[i], c2 = PALETTE[j];
+          var dr = c1[1] - c2[1], dg = c1[2] - c2[2], db = c1[3] - c2[3];
+          if (dr * dr + dg * dg + db * db <= 1600) PAL_TOL[i * 64 + j] = 1;
+        }
+      }
+    }
+    return a < 64 && PAL_TOL[a * 64 + b];
   }
   function gridRangeSig(wx0, wy0, wx1, wy1) {
     var keys = [];
@@ -964,6 +995,14 @@
   }
   function runCalibrate() {
     if (ST.calibBusy) return;
+    // 强制采纳：拒绝后 2 分钟内再点 = 采纳缓存的最高候选（跳过守门，目视核对兜底）
+    var f = ST.calibForce;
+    if (f && f.best && Date.now() - f.t < 120000) {
+      ST.calibForce = null;
+      var tplF = tplById(f.tplId);
+      var tTilesF = tplF ? collectTplTiles(f.tplId) : [];
+      if (tplF && tTilesF.length) { acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true); return; }
+    }
     if (ST.editTile) { editSnapT = 0; syncEditOverlay(); } // 校准前重快照：色板/抖动/翻转改动立即生效
     var tpl = pickCalibTemplate();
     if (!tpl) { ST.calibMsg = { ok: false, msg: '未找到可校准的模板瓦片（先让官方覆盖图渲染出现）', t: Date.now() }; updateHud(); return; }
@@ -1065,6 +1104,13 @@
       else cb(res);
     })();
   }
+  // 显著性守门三档（v2.5.5 放宽：容差匹配后真峰上移，但「成品大量近似色/部分未画」
+  // 场景真峰绝对值仍不高，靠与背景的区分度分档接受；拒绝后仍有强制采纳兜底）：
+  // 高分突出（m≥0.4 差 0.12）/ 中分较突出（m≥0.3 差 0.22）/ 低分较突出（m≥0.25 差 0.18，
+  // 档内 d 上限 = m（bg≥0），第三档参数必须满足 d 上限 < m 才可能触发）
+  function calibSignificant(m, bg) {
+    return (m >= 0.4 && m - bg >= 0.12) || (m >= 0.3 && m - bg >= 0.22) || (m >= 0.25 && m - bg >= 0.18);
+  }
   // 阶梯搜索：峰宽由模板细节密度决定（高细节图案错位 4px+ 匹配率即崩到噪声水平），
   // 粗步长网格踩不到窄峰 → 半径从近到远分级、步长逐级放大，每级做显著性判断，命中即停。
   // 真实场景（模板拖到已画内容附近）绝大多数停在第 1 级（<0.15s）；全级失败才拒绝。
@@ -1096,7 +1142,7 @@
           }
         }
         var cand = res[0];
-        var significant = !!cand && (cand.m >= 0.5 && cand.m - bg >= 0.15 || cand.m >= 0.35 && cand.m - bg >= 0.3);
+        var significant = !!cand && calibSignificant(cand.m, bg);
         if (significant || si >= stages.length) {
           // 显著（命中即停）或已到最后一级（用最高分走守门）→ 精搜收口后终点判断
           refineAndFinish(tpl, tTiles, samples, editMode, G, cand, function (best) {
@@ -1140,7 +1186,9 @@
       runFine(res[0] && res[0].m >= seed.m - 0.005 ? res[0] : seed);
     });
   }
-  // 终点：全量统计（fullScan 口径）→ 显著性守门 → 写入校准结果
+  // 终点：全量统计（fullScan 口径）→ 显著性守门 → 写入校准结果。
+  // 拒绝时缓存候选到 ST.calibForce（2 分钟内再点「🎯 校准」= 强制采纳此结果，
+  // 用户要求的低门槛兜底；不点「应用对齐」无持久副作用，点「清校准」即可撤销）
   function calibFinish(tpl, tTiles, samples, editMode, G, best, bg) {
     var mFull = 0, stat = null;
     if (best) {
@@ -1149,19 +1197,22 @@
     }
     // 假峰守门：编辑会话搜索范围大（阶梯至 ±1120），海洋/他人涂鸦的噪声峰可达 30%+
     // （实测 36% 假峰）。接受条件 = 匹配率够高且显著高于背景噪声；普通模式半径小保持原门槛。
-    var accept = !!best && (editMode
-      ? (mFull >= 0.5 && mFull - bg >= 0.15) || (mFull >= 0.35 && mFull - bg >= 0.3)
-      : mFull >= CALIB_MIN_MATCH);
+    var accept = !!best && (editMode ? calibSignificant(mFull, bg) : mFull >= CALIB_MIN_MATCH);
     if (!accept) {
       if (editMode) clearCalib();
+      ST.calibForce = best && editMode ? { t: Date.now(), tplId: tpl.id, best: best, stat: stat, mFull: mFull, editMode: true } : null;
       ST.calibMsg = {
         ok: false,
-        msg: '未找到可靠对齐（最高匹配 ' + Math.round(mFull * 100) + '%）：画布上该区域没有与模板对应的已画内容——确认别人已画的部分在模板附近（先在地图上找到它，把模板拖过去）再校准',
+        msg: '未找到可靠对齐（最高匹配 ' + Math.round(mFull * 100) + '%）：画布上该区域没有与模板对应的已画内容——确认别人已画的部分在模板附近（先在地图上找到它，把模板拖过去）再校准；若参照层实际已对上、只是颜色差异大，再点一次「🎯 校准」强制采纳此结果',
         t: Date.now()
       };
       finishCalib();
       return;
     }
+    acceptCalib(tpl, best, stat, mFull, editMode, false);
+  }
+  // 写入校准结果（正常接受与强制采纳共用）
+  function acceptCalib(tpl, best, stat, mFull, editMode, forced) {
     var lb = editMode && ST.liveTpls.length ? ST.liveTpls[0] : null;
     ST.calib = {
       tplId: tpl.id, tplName: tpl.name,
@@ -1176,9 +1227,10 @@
     var pct = Math.round(mFull * 100);
     ST.calibMsg = {
       ok: true,
-      msg: '🎯 对齐 δ(' + best.dx + ',' + best.dy + ') 匹配 ' + pct + '% · 已画对 ' + stat.done + ' · 画错 ' + stat.wrong + ' · 未画 ' + stat.missing +
+      msg: (forced ? '⚠️ 已强制采纳（低置信）' : '🎯 对齐') + ' δ(' + best.dx + ',' + best.dy + ') 匹配 ' + pct + '% · 已画对 ' + stat.done + ' · 画错 ' + stat.wrong + ' · 未画 ' + stat.missing +
         (stat.freeOnly ? ' · 💡画错像素全部为免费色，色板建议用「免费颜色」' : '') +
-        (isLiveId(tpl.id) ? ' · ✏️参照层已平移到对齐位置（移出视野时拖动地图查看）；点官方「应用」保存后自动写入最终位置' : ''),
+        (isLiveId(tpl.id) ? ' · ✏️参照层已平移到对齐位置（移出视野时拖动地图查看）；点官方「应用」保存后自动写入最终位置' : '') +
+        (forced ? '——请目视核对参照层位置，不对就点「清校准」' : ''),
       t: Date.now()
     };
     finishCalib();
@@ -1194,6 +1246,8 @@
       if (!v) continue;
       n++;
       if (v === s.pi) hit++;
+      else if (v >= 129) { if (palTolHit(s.pi, v - 128)) hit++; }
+      else if (v < 64) { if (palTolHit(s.pi, v)) hit++; } // 画手用调色板相邻色画（精确是另一索引）
     }
     return n >= 8 ? hit / n : 0;
   }
@@ -1245,10 +1299,12 @@
           var stv = 0;
           if (v) {
             if (v === pi) { stv = 1; done++; }
+            else if ((v >= 129 && palTolHit(pi, v - 128)) || (v < 64 && palTolHit(pi, v))) { stv = 1; done++; }
             else {
               stv = 2; wrong++;
               wrongN++;
-              if (v === 255 ? FREE_COLOR_IDX[nearestPaletteIdx(tt.rgba[o], tt.rgba[o + 1], tt.rgba[o + 2])] : FREE_COLOR_IDX[v - 1]) wrongFree++;
+              var vIdx = v === 255 ? nearestPaletteIdx(tt.rgba[o], tt.rgba[o + 1], tt.rgba[o + 2]) : (v >= 129 ? v - 128 : v);
+              if (FREE_COLOR_IDX[vIdx]) wrongFree++;
             }
           } else if (G || canvasPixelAt(mxBase + (x + 0.5) * mxStep + fdx, my)) {
             stv = 3; missing++;
@@ -1320,7 +1376,7 @@
     return true;
   }
   function clearCalib() {
-    ST.calib = null; ST.calibMsg = null; ST.progRev++;
+    ST.calib = null; ST.calibMsg = null; ST.calibForce = null; ST.progRev++;
     for (var i = 0; i < ST.tiles.length; i++) { ST.tiles[i].stData = null; ST.tiles[i].stCv = null; }
   }
   // 新画布瓦片到达 / 模板纹理更新后重算统计与状态图（不重跑偏移搜索）。

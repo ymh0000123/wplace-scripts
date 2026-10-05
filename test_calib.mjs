@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.5.4', SRC.includes('// @version      2.5.4'));
+check('版本 2.5.5', SRC.includes('// @version      2.5.5'));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -668,7 +668,10 @@ check('编辑基准优先 localStorage 同尺寸模板 bounds', SRC.includes('ot
 check('精搜两级（step4 ±8 → step1 ±3）', SRC.includes('fy += 4') && SRC.includes('var fineB'));
 check('终点守门 calibFinish', SRC.includes('function calibFinish(tpl, tTiles, samples, editMode, G, best, bg)'));
 check('fullScan 走网格', SRC.includes('function fullScan(tpl, tTiles, dx, dy, G)'));
-check('假峰显著性守门（高匹配且高于背景）', SRC.includes('mFull >= 0.5 && mFull - bg >= 0.15') && SRC.includes('mFull >= 0.35 && mFull - bg >= 0.3'));
+check('假峰显著性守门三档 calibSignificant', SRC.includes('function calibSignificant(m, bg)') && SRC.includes('m >= 0.4 && m - bg >= 0.12') && SRC.includes('m >= 0.25 && m - bg >= 0.18') && SRC.includes('editMode ? calibSignificant(mFull, bg)'));
+check('拒绝缓存强制采纳 ST.calibForce', SRC.includes('ST.calibForce = best && editMode') && SRC.includes("Date.now() - f.t < 120000") && SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true)'));
+check('clearCalib 清强制采纳缓存', SRC.includes('ST.calib = null; ST.calibMsg = null; ST.calibForce = null;'));
+check('颜色容差匹配（网格 129..191 编码 + palTol 表）', SRC.includes('128 + nearestPaletteCached') && SRC.includes('function palTolHit(a, b)') && SRC.includes('palTolHit(s.pi, v - 128)') && SRC.includes('palTolHit(s.pi, v)') && SRC.includes('palTolHit(pi, v - 128)') && SRC.includes('palTolHit(pi, v)'));
 check('编辑模式失败清校准（拆掉旧假峰平移）', SRC.includes('if (editMode) clearCalib();'));
 check('calibBusy 在终点释放', SRC.includes('function finishCalib() { ST.calibBusy = false; updateHud(); }'));
 check('refreshCalibStats 复用网格不现建', SRC.includes('Math.ceil(cy + halfH + pad), true, function (G)'));
@@ -682,6 +685,14 @@ function gridAt(G, wx, wy) {
   if (x < 0 || y < 0 || x >= G.gw || y >= G.gh) return 0;
   return G.grid[y * G.gw + x];
 }
+function nearestIdxSim(r, g, b) {
+  let best = 1, bd = Infinity;
+  for (const k in PAL_SIM) {
+    const c = PAL_SIM[k], dr = r - c[0], dg = g - c[1], db = b - c[2], d = dr * dr + dg * dg + db * db;
+    if (d < bd) { bd = d; best = +k; }
+  }
+  return best;
+}
 function fillGridTile(G, t, im) {
   const bx = t.x * TILE_PX - G.gx0, by = t.y * TILE_PX - G.gy0;
   let painted = 0;
@@ -690,7 +701,7 @@ function fillGridTile(G, t, im) {
     for (let x = 0; x < t.w; x++) {
       const o = ro + x * 4;
       if (t.data[o + 3] < 128) continue;
-      G.grid[gi + x] = im.get((t.data[o] << 16) | (t.data[o + 1] << 8) | t.data[o + 2]) || 255;
+      G.grid[gi + x] = im.get((t.data[o] << 16) | (t.data[o + 1] << 8) | t.data[o + 2]) || (128 + nearestIdxSim(t.data[o], t.data[o + 1], t.data[o + 2]));
       painted++;
     }
   }
@@ -704,14 +715,15 @@ console.log('== E6: 快查网格构建与查询 ==');
   const put = (x, y, c, a) => { const o = (y * w + x) * 4; data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = a; };
   put(456, 123, PAL_SIM[1], 255);
   put(457, 123, PAL_SIM[2], 255);
-  put(458, 123, [12, 34, 56], 255);   // 调色板外 → 网格 255
+  put(458, 123, [12, 34, 56], 255);   // 调色板外 → 网格 128+最近索引（最近=3 → 131）
   put(459, 123, PAL_SIM[1], 64);      // alpha<128 → 未涂
   const gx0 = 3000 * TILE_PX, gy0 = 2000 * TILE_PX, gw = TILE_PX, gh = TILE_PX;
   const G = { gx0, gy0, gw, gh, grid: new Uint8Array(gw * gh), painted: 0 };
   fillGridTile(G, { x: 3000, y: 2000, w, h, data }, paintKeyMap);
   check('已涂调色板色 → 索引', gridAt(G, gx0 + 456, gy0 + 123) === 1);
   check('第二色 → 各自索引', gridAt(G, gx0 + 457, gy0 + 123) === 2);
-  check('调色板外已涂 → 255', gridAt(G, gx0 + 458, gy0 + 123) === 255);
+  check('调色板外已涂 → 128+最近索引', gridAt(G, gx0 + 458, gy0 + 123) === 131,
+    'val=' + gridAt(G, gx0 + 458, gy0 + 123));
   check('alpha<128 视为未涂 → 0', gridAt(G, gx0 + 459, gy0 + 123) === 0);
   check('未涂区域 → 0', gridAt(G, gx0 + 100, gy0 + 100) === 0);
   check('网格外 → 0', gridAt(G, gx0 - 1, gy0) === 0 && gridAt(G, gx0 + gw, gy0) === 0);
@@ -729,7 +741,16 @@ console.log('== E6: 快查网格构建与查询 ==');
 }
 
 // ---------- 阶梯搜索复刻（v2.5.3：半径分级 × 步长放大 × 显著性命中即停） ----------
-function scoreOffsetG(valid, dx, dy, subStep, G) {
+// v2.5.5 容差表复刻：PAL_SIM 5 色两两 RGB 距离²均 >1600，仅自身近似（保真口径）
+const PAL_TOL_SIM = new Uint8Array(64 * 64);
+for (const a in PAL_SIM) for (const b in PAL_SIM) {
+  const c1 = PAL_SIM[a], c2 = PAL_SIM[b];
+  const dr = c1[0] - c2[0], dg = c1[1] - c2[1], db = c1[2] - c2[2];
+  if (+a === +b || dr * dr + dg * dg + db * db <= 1600) PAL_TOL_SIM[+a * 64 + +b] = 1;
+}
+const palTolHitSim = (a, b) => a < 64 && PAL_TOL_SIM[a * 64 + b];
+function scoreOffsetG(valid, dx, dy, subStep, G, tolFn) {
+  const tol = tolFn || palTolHitSim;
   let hit = 0, n = 0;
   for (let i = 0; i < valid.length; i += subStep) {
     const s = valid[i];
@@ -737,6 +758,8 @@ function scoreOffsetG(valid, dx, dy, subStep, G) {
     if (!v) continue;
     n++;
     if (v === s.pi) hit++;
+    else if (v >= 129) { if (tol(s.pi, v - 128)) hit++; }
+    else if (v < 64) { if (tol(s.pi, v)) hit++; }
   }
   return n >= 8 ? hit / n : 0;
 }
@@ -764,7 +787,7 @@ function stageSearch(samples, G, stages) {
     let bg = 0;
     for (const r of res) if (Math.abs(r.dx - res[0].dx) > 96 || Math.abs(r.dy - res[0].dy) > 96) { if (r.m > bg) bg = r.m; }
     const cand = res[0];
-    const significant = !!cand && (cand.m >= 0.5 && cand.m - bg >= 0.15 || cand.m >= 0.35 && cand.m - bg >= 0.3);
+    const significant = !!cand && ((cand.m >= 0.4 && cand.m - bg >= 0.12) || (cand.m >= 0.3 && cand.m - bg >= 0.22) || (cand.m >= 0.25 && cand.m - bg >= 0.18));
     if (!significant && si < stages.length) continue; // 不显著 → 下一级
     // 精搜收口：编辑大半径级先邻域细化（±16 步长 8）→ step4 ±8 → step1 ±3
     let seed = cand;
@@ -912,6 +935,54 @@ console.log('== E8: 假峰显著性守门 ==');
   const acceptC1 = 0.36 >= 0.5 && 0.36 - 0.30 >= 0.15;
   const acceptC2 = 0.36 >= 0.35 && 0.36 - 0.30 >= 0.3;
   check('实测案例（m=36% bg=30%）→ 拒绝', !acceptC1 && !acceptC2);
+}
+
+// ================= v2.5.5 颜色容差 + 三档守门 + 强制采纳 =================
+console.log('== E9: 容差匹配与放宽守门 ==');
+{
+  // 近似色对：1[237,28,36] 与 2[220,50,60] 距离²=1349 ≤1600 → 互为近似；3[0,0,0] 与谁都远
+  const P9 = { 1: [237, 28, 36], 2: [220, 50, 60], 3: [0, 0, 0] };
+  const map9 = new Map();
+  for (const k in P9) { const c = P9[k]; map9.set((c[0] << 16) | (c[1] << 8) | c[2], +k); }
+  const tol9 = new Uint8Array(64 * 64);
+  for (const a in P9) for (const b in P9) {
+    const c1 = P9[a], c2 = P9[b];
+    const dr = c1[0] - c2[0], dg = c1[1] - c2[1], db = c1[2] - c2[2];
+    if (+a === +b || dr * dr + dg * dg + db * db <= 1600) tol9[+a * 64 + +b] = 1;
+  }
+  const hit9 = (a, b) => a < 64 && tol9[a * 64 + b];
+  check('近似色对判定（1≈2、1≉3）', hit9(1, 2) === 1 && hit9(2, 1) === 1 && hit9(1, 3) === 0);
+  // 网格：整片填近似色 2（画手用了相邻红）+ 一角填远色 3
+  const w9 = 64, G9 = { gx0: 0, gy0: 0, gw: w9, gh: w9, grid: new Uint8Array(w9 * w9), painted: 0 };
+  for (let i = 0; i < w9 * w9; i++) G9.grid[i] = 2;
+  for (let x = 0; x < 8; x++) for (let y = 0; y < 8; y++) G9.grid[y * w9 + x] = 3;
+  const smp9 = [];
+  for (let i = 0; i < 8; i++) smp9.push({ wx: 32 + (i % 3) * 2, wy: 32 + (i % 2) * 2, pi: 1 });
+  const mExact = scoreOffsetG(smp9, 0, 0, 1, G9, hit9);
+  check('近似色画布：容差口径 hit=1.0（画手用调色板相邻色）', mExact === 1.0, 'm=' + mExact);
+  const smpFar = [{ wx: 4, wy: 4, pi: 1 }];
+  check('远色像素仍算画错', scoreOffsetG([...smpFar, ...smpFar, ...smpFar, ...smpFar, ...smpFar, ...smpFar, ...smpFar, ...smpFar], 0, 0, 1, G9, hit9) === 0);
+  // 最近色编码命中：画布填非调色板色 [228,39,48]（最近=1 → 网格 129），模板色=2（近似 1）→ hit
+  const G10 = { gx0: 0, gy0: 0, gw: w9, gh: w9, grid: new Uint8Array(w9 * w9), painted: 0 };
+  const cvData = new Uint8ClampedArray(w9 * w9 * 4);
+  for (let i = 0; i < w9 * w9; i++) { cvData[i * 4] = 228; cvData[i * 4 + 1] = 39; cvData[i * 4 + 2] = 48; cvData[i * 4 + 3] = 255; }
+  fillGridTile(G10, { x: 0, y: 0, w: w9, h: w9, data: cvData }, map9);
+  check('非调色板色 → 网格 128+最近索引', gridAt(G10, 32, 32) === 129, 'val=' + gridAt(G10, 32, 32));
+  const smp10 = [{ wx: 32, wy: 32, pi: 2 }, { wx: 33, wy: 32, pi: 2 }, { wx: 32, wy: 33, pi: 2 }, { wx: 33, wy: 33, pi: 2 },
+                 { wx: 34, wy: 32, pi: 2 }, { wx: 32, wy: 34, pi: 2 }, { wx: 34, wy: 34, pi: 2 }, { wx: 35, wy: 32, pi: 2 }];
+  check('最近色编码参与容差命中', scoreOffsetG(smp10, 0, 0, 1, G10, hit9) === 1.0);
+  // 三档守门边界（d 上限 = m，第三档必须可触发）
+  const sig = (m, bg) => (m >= 0.4 && m - bg >= 0.12) || (m >= 0.3 && m - bg >= 0.22) || (m >= 0.25 && m - bg >= 0.18);
+  check('三档：0.40/0.28（差 0.12）过', sig(0.40, 0.28));
+  check('三档：0.30/0.08（差 0.22）过', sig(0.30, 0.08));
+  check('三档：0.26/0.07（差 0.19≥0.18）过', sig(0.26, 0.07));
+  check('三档：0.39/0.28（差 0.11）拒', !sig(0.39, 0.28));
+  check('三档：0.29/0.07（第三档差 0.22≥0.18）过', sig(0.29, 0.07));
+  check('三档：0.24/0.00（m<0.25）拒', !sig(0.24, 0.00));
+  check('旧案例 0.36/0.30 新档仍拒', !sig(0.36, 0.30));
+  // 用户场景：40% 真峰 + 低背景 → 第一档放行（v2.5.4 拒 → v2.5.5 收）
+  check('用户场景 0.40/0.15 → 放行', sig(0.40, 0.15));
+  check('用户场景 0.40/0.25 → 放行（差 0.15≥0.12）', sig(0.40, 0.25));
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');
