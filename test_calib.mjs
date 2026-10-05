@@ -515,5 +515,136 @@ console.log('== L6: pickCalibTemplate 编辑中模板优先 ==');
   check('编辑中不可见 → 落回已保存', pickSim([{ ...liveTpl, visible: false }, realTpl], [liveTile, realTile]) === realTpl);
 }
 
+// ================= v2.5.2 放置编辑会话（DOM overlay） =================
+// 场景：编辑器预览 = DOM 2D canvas（不走 WebGL）；fetch hook 不穿透 → 画布数据主动
+// fetch；live 基准 = location 中心；δ 由大范围搜索得出；应用 = set bounds = liveBounds+δ。
+
+console.log('== E0: v2.5.2 源码一致 ==');
+check('编辑会话捕获函数存在', SRC.includes('function syncEditOverlay()') && SRC.includes('function editOverlayEl()'));
+check('DOM overlay 选择器（div.overlay.active canvas）', SRC.includes("'div.overlay.active canvas'"));
+check('主动补抓走官方 files 端点', SRC.includes("'https://backend.wplace.live/files/' + ST.shard + '/tiles/'"));
+check('编辑 tile 相对角用 Mercator 单位（非归一化）', SRC.includes('TR: [Wrender / WORLD_PX, 0]'));
+check('live 基准 = location 中心', SRC.includes('mx0: cmx - halfW, mx1: cmx + halfW'));
+check('δ 屏幕平移分支（screenScale）', SRC.includes('calibTile && ST.calib.screen'));
+check('应用对齐 liveBounds 为 set 语义', SRC.includes('b.west = lngAt((c.liveBounds.mx0 + c.dmx) * WORLD_PX)'));
+check('启动读一次 location 建初始 anchor', SRC.includes('var loc0 = editBaseLoc();'));
+check('编辑会话 500ms 跟踪定时器', SRC.includes('setInterval(syncEditOverlay, 500)'));
+check('persist 后自动写入最终位置', SRC.includes('applyCalibToStorage();') && SRC.includes('ST.persistT = Date.now();'));
+check('校准前强制重快照编辑器内容', SRC.includes('if (ST.editTile) { editSnapT = 0; syncEditOverlay(); }'));
+check('syncLiveTemplates 编辑会话互斥', SRC.includes('if (ST.editTile) return; // 编辑会话由 syncEditOverlay 独占 live 维护'));
+
+console.log('== E1: 编辑 tile 构造 + live bounds（location 中心基准） ==');
+{
+  const loc = { lng: 120.70441, lat: 27.81327, zoom: 14.5 }; // 页面实测值
+  const CW = 1227, CH = 1792;
+  const Wrender = CW, Hrender = CH; // 100% 缩放
+  const cmx = mx01(loc.lng), cmy = my01(loc.lat);
+  const halfW = Wrender / WORLD_PX / 2, halfH = Hrender / WORLD_PX / 2;
+  const live = { mx0: cmx - halfW, mx1: cmx + halfW, my0: cmy - halfH, my1: cmy + halfH };
+  // 编辑 tile：相对四角 = Mercator 单位（与 WebGL 捕获瓦片同语义）
+  const etile = { TL: [0, 0], TR: [Wrender / WORLD_PX, 0], BR: [Wrender / WORLD_PX, Hrender / WORLD_PX], BL: [0, Hrender / WORLD_PX], cw: CW, ch: CH };
+  check('相对角宽 = live bounds 宽（自洽）', Math.abs((etile.TR[0] - etile.TL[0]) - (live.mx1 - live.mx0)) < 1e-15);
+  // texPxMerc 语义：像素 (0,0) 中心 = live 西北角 + 半像素
+  const m00 = [live.mx0 + etile.TL[0] + (etile.TR[0] - etile.TL[0]) * 0.5 / etile.cw,
+               live.my0 + etile.TL[1] + (etile.BL[1] - etile.TL[1]) * 0.5 / etile.ch];
+  check('像素 (0,0) 中心 = 基准西北角 + 半像素', Math.abs(m00[0] - (live.mx0 + 0.5 / WORLD_PX)) < 1e-15);
+  check('live bounds 宽 = 模板渲染世界宽', Math.round((live.mx1 - live.mx0) * WORLD_PX) === Wrender);
+  // δ屏幕 ↔ δ世界：scale = rect.width / Wrender（实测 rect 423.140625）
+  const scale = 423.140625 / Wrender;
+  const dwx = 100, dwy = -50;
+  check('δ世界 → δ屏幕 round-trip（±0.01 屏幕 px）',
+    Math.abs((dwx * scale) / scale - dwx) < 0.01 && Math.abs((dwy * scale) / scale - dwy) < 0.01,
+    `scale=${scale.toFixed(6)}`);
+  // pickColorAtOfficial 的 dux 公式兼容性：dux = dmx/(TR-TL)*cw 应等于 δ世界像素
+  const dmx = dwx / WORLD_PX;
+  const dux = dmx / (etile.TR[0] - etile.TL[0]) * etile.cw;
+  check('δ 校正 dux = δ世界像素（编辑 tile 语义）', Math.abs(dux - dwx) < 1e-9, `dux=${dux}`);
+}
+
+console.log('== E2: ensureMapTiles 主动补抓（mock fetch） ==');
+{
+  const mapTiles2 = { '2000,1000': { t: 1 } }; // 已缓存 1 片
+  let fetched = [];
+  const store2 = (x, y) => { mapTiles2[x + ',' + y] = { x, y, t: Date.now() }; };
+  // 复刻 worker 并发结构（同步 fetch mock，cb 延迟压到 0）
+  function ensureSim(tx0, ty0, tx1, ty1, cb) {
+    const need = [];
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      if (!mapTiles2[tx + ',' + ty]) need.push([tx, ty]);
+    }
+    if (!need.length) { setTimeout(cb, 0); return; }
+    let idx = 0, finished = 0, got = 0;
+    const workers = Math.min(4, need.length);
+    const worker = () => {
+      if (idx >= need.length) { finished++; if (finished >= workers) setTimeout(cb, 0); return; }
+      const p = need[idx++];
+      fetched.push(p);
+      store2(p[0], p[1]); got++;
+      worker();
+    };
+    for (let k = 0; k < workers; k++) worker();
+  }
+  ensureSim(2000, 1000, 2001, 1001, () => {});
+  await new Promise(r => setTimeout(r, 10));
+  check('范围 4 瓦片、已缓存 1 → 补抓 3 片', fetched.length === 3, JSON.stringify(fetched));
+  check('补抓后全部命中缓存', ['2000,1000', '2000,1001', '2001,1000', '2001,1001'].every(k => mapTiles2[k]));
+  fetched = [];
+  ensureSim(2000, 1000, 2001, 1001, () => {});
+  await new Promise(r => setTimeout(r, 10));
+  check('二次调用零请求（已缓存跳过）', fetched.length === 0);
+}
+
+console.log('== E3: 应用对齐——liveBounds set 语义 ==');
+{
+  // 复刻 applyCalibToStorage 的 liveBounds 分支
+  const loc = { lng: 120.70441, lat: 27.81327 };
+  const CW = 1227, CH = 1792;
+  const cmx = mx01(loc.lng), cmy = my01(loc.lat);
+  const liveBounds = {
+    mx0: cmx - CW / WORLD_PX / 2, mx1: cmx + CW / WORLD_PX / 2,
+    my0: cmy - CH / WORLD_PX / 2, my1: cmy + CH / WORLD_PX / 2
+  };
+  const dwx = 37, dwy = -11;
+  const dmx = dwx / WORLD_PX, dmy = dwy / WORLD_PX;
+  const b = {
+    west: lngAt((liveBounds.mx0 + dmx) * WORLD_PX), east: lngAt((liveBounds.mx1 + dmx) * WORLD_PX),
+    north: mercYToLat(liveBounds.my0 + dmy), south: mercYToLat(liveBounds.my1 + dmy)
+  };
+  const px = (mx) => mx * WORLD_PX;
+  check('west = liveBounds 西界 + δ', Math.round(px(mx01(b.west))) === Math.round(px(liveBounds.mx0) + dwx));
+  check('east = liveBounds 东界 + δ', Math.round(px(mx01(b.east))) === Math.round(px(liveBounds.mx1) + dwx));
+  check('north = liveBounds 北界 + δ', Math.abs(px(my01(b.north)) - (px(liveBounds.my0) + dwy)) < 1e-6);
+  check('south = liveBounds 南界 + δ', Math.abs(px(my01(b.south)) - (px(liveBounds.my1) + dwy)) < 1e-6);
+  check('宽高不变（纯平移 set）', Math.round(px(mx01(b.east)) - px(mx01(b.west))) === CW &&
+    Math.round(px(my01(b.south)) - px(my01(b.north))) === CH);
+}
+
+console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） ==');
+{
+  // 复刻 syncEditOverlay 拆除路径的迁移
+  const calib = { tplId: 'wpAC-live' };
+  const tpls = [
+    { id: 'old-a', visible: true, updatedAt: 1000 },
+    { id: 'new-b', visible: true, updatedAt: 9000 }, // 官方「应用」persist 的那条
+    { id: 'hid-c', visible: false, updatedAt: 99999 } // 不可见不参与
+  ];
+  let mig = null, bestT = -1;
+  const persistT = Date.now() - 5000; // 5s 前 persist
+  if (persistT && Date.now() - persistT < 30000) {
+    for (const mt of tpls) {
+      if (mt.virtual || !mt.visible) continue;
+      if ((mt.updatedAt || 0) >= bestT) { bestT = mt.updatedAt || 0; mig = mt; }
+    }
+  }
+  check('迁移到最近 persist 的可见模板', mig && mig.id === 'new-b', mig && mig.id);
+  // 超过 30s 窗口（用户手动关编辑器，无 persist）→ 不迁移，保留引用等待重开编辑器
+  let mig2 = null, bestT2 = -1;
+  const persistT2 = Date.now() - 60000;
+  if (persistT2 && Date.now() - persistT2 < 30000) {
+    for (const mt of tpls) { if (!mt.virtual && mt.visible && (mt.updatedAt || 0) >= bestT2) { bestT2 = mt.updatedAt || 0; mig2 = mt; } }
+  }
+  check('无 persist → 不迁移（live id 保留，重开编辑器自动接上）', mig2 === null && calib.tplId === 'wpAC-live');
+}
+
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);
