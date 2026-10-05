@@ -532,6 +532,8 @@ check('编辑会话 500ms 跟踪定时器', SRC.includes('setInterval(syncEditOv
 check('persist 后自动写入最终位置', SRC.includes('applyCalibToStorage();') && SRC.includes('ST.persistT = Date.now();'));
 check('校准前强制重快照编辑器内容', SRC.includes('if (ST.editTile) { editSnapT = 0; syncEditOverlay(); }'));
 check('syncLiveTemplates 编辑会话互斥', SRC.includes('if (ST.editTile) return; // 编辑会话由 syncEditOverlay 独占 live 维护'));
+check('小模板门槛 ≥16（100×100 必须能过；>256 曾致编辑会话失效）',
+  SRC.includes('cv.width >= 16 && cv.height >= 16') && !SRC.includes('cv.width > 256'));
 
 console.log('== E1: 编辑 tile 构造 + live bounds（location 中心基准） ==');
 {
@@ -651,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.5.3', SRC.includes('// @version      2.5.3'));
+check('版本 2.5.4', SRC.includes('// @version      2.5.4'));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
