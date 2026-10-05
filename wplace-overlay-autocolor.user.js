@@ -2,9 +2,9 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.5.5
-// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
-// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
+// @version      2.6.0
+// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
+// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
 // @author       you
 // @match        https://wplace.live/*
 // @run-at       document-start
@@ -161,6 +161,7 @@
     calibBusy: false,
     calibMsg: null,     // 校准结果文案（HUD 显示）
     calibForce: null,   // 守门拒绝时缓存的最高候选 {t,tplId,best,stat,mFull,editMode}——2 分钟内再点「🎯 校准」= 强制采纳
+    styleBusy: false,   // v2.6.0 颜色风格识别进行中（逐组合切换官方颜色设置并实测，期间禁点校准/暂停周期重快照）
     progRev: 0,         // 校准状态图版本号
     tileFetching: {},   // 主动补抓去重 {"x,y": true}
     liveTpls: [],       // 编辑中模板的虚拟条目（syncLiveTemplates/syncEditOverlay 维护，不写 localStorage）
@@ -899,7 +900,8 @@
     t.tileW = Wrender;
     t.TL = [0, 0]; t.TR = [Wrender / WORLD_PX, 0]; t.BR = [Wrender / WORLD_PX, Hrender / WORLD_PX]; t.BL = [0, Hrender / WORLD_PX];
     // 模板纹理快照：进入会话 / 尺寸变化 / 每 3s 内容可能变化（改色板/抖动/翻转）时刷新
-    if (!t.rgba || now - editSnapT > 3000) {
+    // 风格识别中跳过：识别流程自己管理快照，周期快照会把中间候选的渲染写进 t.rgba
+    if ((!t.rgba || now - editSnapT > 3000) && !ST.styleBusy) {
       editSnapT = now;
       try {
         var snap = document.createElement('canvas');
@@ -994,14 +996,14 @@
     return null;
   }
   function runCalibrate() {
-    if (ST.calibBusy) return;
+    if (ST.calibBusy || ST.styleBusy) return; // 风格识别中切换官方控件，重入会打乱实测序列
     // 强制采纳：拒绝后 2 分钟内再点 = 采纳缓存的最高候选（跳过守门，目视核对兜底）
     var f = ST.calibForce;
     if (f && f.best && Date.now() - f.t < 120000) {
       ST.calibForce = null;
       var tplF = tplById(f.tplId);
       var tTilesF = tplF ? collectTplTiles(f.tplId) : [];
-      if (tplF && tTilesF.length) { acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true); return; }
+      if (tplF && tTilesF.length) { acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null); return; }
     }
     if (ST.editTile) { editSnapT = 0; syncEditOverlay(); } // 校准前重快照：色板/抖动/翻转改动立即生效
     var tpl = pickCalibTemplate();
@@ -1209,10 +1211,10 @@
       finishCalib();
       return;
     }
-    acceptCalib(tpl, best, stat, mFull, editMode, false);
+    acceptCalib(tpl, best, stat, mFull, editMode, false, G);
   }
   // 写入校准结果（正常接受与强制采纳共用）
-  function acceptCalib(tpl, best, stat, mFull, editMode, forced) {
+  function acceptCalib(tpl, best, stat, mFull, editMode, forced, G) {
     var lb = editMode && ST.liveTpls.length ? ST.liveTpls[0] : null;
     ST.calib = {
       tplId: tpl.id, tplName: tpl.name,
@@ -1234,6 +1236,9 @@
       t: Date.now()
     };
     finishCalib();
+    // v2.6.0：对齐命中后按已画内容实测官方颜色设置组合，自动切到画手风格
+    // （强制采纳不跑：对齐本身未核实，分数不可信；G 为 null 同样跳过）
+    if (editMode && !forced && G) detectColorStyle(tpl, best, G, ST.calibMsg ? ST.calibMsg.msg : '');
   }
   // 匹配率评分：模板量化色（预转调色板索引）vs 网格索引（δ 平移后），与官方 auto-paint
   // 一致逐字节精确比较。网格 0 = 画布未涂/无数据 → 不算分母
@@ -1409,8 +1414,281 @@
         c.stale = false;
         var stat = fullScan(tpl, tTiles, c.dwx, c.dwy, G);
         c.total = stat.total; c.done = stat.done; c.wrong = stat.wrong; c.missing = stat.missing; c.freeOnly = stat.freeOnly;
+        // match 一并刷新：风格识别切换颜色设置后 done/wrong 变化，match 门槛管着「应用对齐」按钮
+        c.match = stat.done + stat.wrong > 0 ? stat.done / (stat.done + stat.wrong) : 0;
         ST.progRev++;
       });
+  }
+
+  // ---------------- v2.6.0 颜色风格自动识别（编辑会话） ----------------
+  // 已画内容隐含画手使用的官方颜色设置（Color palette × Color Mode × Dithering）。
+  // 不逆向官方量化算法：对齐命中后逐组合切换官方控件 → 等编辑器 canvas 重渲染 →
+  // 快照 → 与已画网格比对精确吻合率，实测择优。切组合只改模板预览渲染（δ 对齐不受
+  // 影响）；最终保留最优组合（可能= 原组合），官方「应用」保存时随模板一起写入。
+  var STYLE_MIN_PAINTED = 30; // 已画采样低于此不识别（噪声主导，择优无意义）
+  var STYLE_SKIP_RATE = 0.92; // 当前设置下已画吻合率 ≥ 此值：已是画手风格，不动 UI
+  var STYLE_MARGIN = 0.04;    // 候选须比当前最优高至少此值才切换（小样本防抖动）
+  function styleFindTriggers() {
+    // 官方编辑器一对下拉 = button.select-trigger + 同 fieldset 内 ul.select-menu。
+    // aria-label 随界面语言本地化 → 先按 label 匹配（Mode/palette），退化按面板顺序
+    //（Color Mode 在前、Color palette 在后，实测全页仅这两个 select-trigger）
+    var list = [], mode = null, pal = null;
+    try {
+      var btns = document.querySelectorAll('button.select-trigger[aria-haspopup="menu"]');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b.offsetWidth > 0 && b.offsetHeight > 0) list.push(b);
+      }
+      for (var j = 0; j < list.length; j++) {
+        var lb = (list[j].getAttribute('aria-label') || '').toLowerCase();
+        if (lb.indexOf('mode') >= 0) mode = list[j];
+        else if (lb.indexOf('palette') >= 0) pal = list[j];
+      }
+      if (!mode && list.length >= 2) { mode = list[0]; pal = list[1]; }
+    } catch (e) {}
+    return mode && pal ? { mode: mode, pal: pal } : null;
+  }
+  function styleMenuItems(trig) {
+    try {
+      var fs = trig.closest('fieldset');
+      return (fs || document).querySelectorAll('button[role="menuitemradio"]');
+    } catch (e) { return []; }
+  }
+  // 打开菜单读取项文案与当前选中索引（文案随语言本地化，索引与 aria-checked 与语言无关）
+  function styleOpenMenu(trig, cb) {
+    try {
+      if (trig.getAttribute('aria-expanded') !== 'true') trig.click();
+    } catch (e) { cb(false, [], -1); return; }
+    var t0 = Date.now();
+    (function poll() {
+      var items = styleMenuItems(trig), texts = [], cur = -1, vis = false;
+      try { vis = items.length > 0 && items[0].offsetWidth > 0; } catch (e) {}
+      if (vis) {
+        for (var i = 0; i < items.length; i++) {
+          texts.push((items[i].textContent || '').trim());
+          if (items[i].getAttribute('aria-checked') === 'true') cur = i;
+        }
+        if (cur >= 0) { cb(true, texts, cur); return; }
+      }
+      if (Date.now() - t0 > 1200) { cb(false, [], -1); return; }
+      setTimeout(poll, 70);
+    })();
+  }
+  // 切下拉到第 idx 项；已是目标项则只收起菜单。cb(ok)
+  function styleSetSelect(trig, idx, cb) {
+    styleOpenMenu(trig, function (ok, texts, cur) {
+      if (!ok) { cb(false); return; }
+      if (cur === idx) { try { trig.click(); } catch (e) {} cb(true); return; }
+      var it = styleMenuItems(trig)[idx];
+      try { it.click(); } catch (e) { try { trig.click(); } catch (e2) {} cb(false); return; }
+      var t0 = Date.now();
+      (function waitClose() {
+        var open = false;
+        try { open = trig.getAttribute('aria-expanded') === 'true'; } catch (e) {}
+        if (!open) { cb(true); return; }
+        if (Date.now() - t0 > 1200) { try { trig.click(); } catch (e) {} cb(false); return; }
+        setTimeout(waitClose, 60);
+      })();
+    });
+  }
+  function styleCanvasSig() {
+    var cv = editOverlayEl();
+    if (!cv) return null;
+    try {
+      var ctx = cv.getContext('2d');
+      if (!ctx) return null;
+      var d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      var h = 0;
+      for (var i = 0; i < d.length; i += 64) h = (h * 33 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) | 0;
+      return h + '#' + d.length;
+    } catch (e) { return null; }
+  }
+  // 等官方编辑器按新设置重渲染：canvas 签名变化或超时（等价组合不变化 → 走满超时），
+  // 之后统一留 150ms 收尾（Svelte 重渲染到像素写入可能跨帧）
+  function styleWaitRender(prevSig, cb) {
+    var t0 = Date.now();
+    (function poll() {
+      var sig = styleCanvasSig();
+      if ((sig && sig !== prevSig) || Date.now() - t0 > 1000) { setTimeout(cb, 150); return; }
+      setTimeout(poll, 90);
+    })();
+  }
+  function styleSnapshot() {
+    var cv = editOverlayEl();
+    if (!cv) return null;
+    try {
+      var cv2 = document.createElement('canvas');
+      cv2.width = cv.width; cv2.height = cv.height;
+      var ctx = cv2.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(cv, 0, 0);
+      return ctx.getImageData(0, 0, cv2.width, cv2.height).data;
+    } catch (e) { return null; }
+  }
+  // 精确吻合率（区别于 fullScan 的容差命中）：风格择优要求判别力——画手设置的正确
+  // 组合会让模板渲染与已画像素逐字节相等，错误组合只会偶合。ov = 候选组合的快照
+  //（省则用 tTiles 现有纹理）。网格 v≥129/255 为非精确编码，必不算命中
+  function styleScan(tpl, tTiles, dx, dy, G, ov) {
+    var keyMap = paintIdxMap(), painted = 0, exact = 0;
+    var fdx = dx / WORLD_PX, fdy = dy / WORLD_PX;
+    for (var i = 0; i < tTiles.length; i++) {
+      var tt = tTiles[i], src = ov || tt.rgba;
+      if (!tt.cw || !src) continue;
+      var mxBase = tpl.mx0 + tt.TL[0], mxStep = (tt.TR[0] - tt.TL[0]) / tt.cw;
+      var myBase = tpl.my0 + tt.TL[1], myStep = (tt.BL[1] - tt.TL[1]) / tt.ch;
+      var step = Math.max(1, Math.round(Math.sqrt(tt.cw * tt.ch / 12000)));
+      for (var y = 0; y < tt.ch; y += step) {
+        var wy = Math.floor((myBase + (y + 0.5) * myStep + fdy) * WORLD_PX);
+        for (var x = 0; x < tt.cw; x += step) {
+          var o = (y * tt.cw + x) * 4;
+          if (src[o + 3] < 200) continue;
+          var v = gridAt(G, Math.floor((mxBase + (x + 0.5) * mxStep + fdx) * WORLD_PX), wy);
+          if (!v) continue;
+          painted++;
+          var pi = keyMap.get((src[o] << 16) | (src[o + 1] << 8) | src[o + 2]) || 255;
+          if (v < 64 && v === pi) exact++;
+        }
+      }
+    }
+    return { painted: painted, exact: exact, rate: painted ? exact / painted : 0 };
+  }
+  function detectColorStyle(tpl, best, G, baseMsg) {
+    if (ST.styleBusy) return;
+    var tTiles = collectTplTiles(LIVE_ID);
+    var trigs = styleFindTriggers();
+    if (!G || !tTiles.length || !trigs) return; // 非编辑会话/面板控件缺失：静默跳过
+    var baseRgba = styleSnapshot();
+    var base = baseRgba ? styleScan(tpl, tTiles, best.dx, best.dy, G, baseRgba) : { painted: 0, rate: 0 };
+    if (base.painted < STYLE_MIN_PAINTED || base.rate >= STYLE_SKIP_RATE) return;
+    ST.styleBusy = true;
+    var aborted = function () { return !ST.calib || !ST.editTile || !editOverlayEl(); };
+    function say(txt) {
+      // calibMsg 仍以 acceptCalib 文案开头才追加（用户清校准/强制流程后不误写）
+      if (ST.calibMsg && baseMsg && ST.calibMsg.msg.indexOf(baseMsg) === 0) {
+        ST.calibMsg.msg = baseMsg + ' · ' + txt;
+        ST.calibMsg.t = Date.now();
+        updateHud();
+      }
+    }
+    // 读当前组合（菜单项文案本地化，用索引）；任一失败 → 放弃不动 UI
+    styleOpenMenu(trigs.pal, function (okP, palTexts, curP) {
+      if (!okP || aborted()) { ST.styleBusy = false; return; }
+      try { trigs.pal.click(); } catch (e) {} // 收起
+      styleOpenMenu(trigs.mode, function (okM, modeTexts, curM) {
+        if (!okM || aborted()) { ST.styleBusy = false; return; }
+        try { trigs.mode.click(); } catch (e) {}
+        var combos = [], p, m;
+        for (p = 0; p < palTexts.length && p < 3; p++)
+          for (m = 0; m < modeTexts.length && m < 3; m++)
+            if (!(p === curP && m === curM)) combos.push([p, m]);
+        var bestR = { rate: base.rate, p: curP, m: curM, isBase: true, ditherOn: null };
+        var dither0 = null;
+        try {
+          var inp0 = document.querySelector('label.dithering input[type="checkbox"]');
+          dither0 = inp0 ? !!inp0.checked : null;
+        } catch (e) {}
+        bestR.ditherOn = dither0;
+        var i = 0, t0 = Date.now();
+        function stepCombo() {
+          if (aborted() || Date.now() - t0 > 45000) { wrapup(); return; }
+          if (i >= combos.length) {
+            // 终门：候选须比原设置高 STYLE_MARGIN 才值得动 UI（扫描期 0.005 只用于追踪最高分，
+            // 已画样本少时 1 个像素就是几个百分点，防把噪声当改善）
+            if (!bestR.isBase && bestR.rate < base.rate + STYLE_MARGIN)
+              bestR = { rate: base.rate, p: curP, m: curM, isBase: true, ditherOn: dither0 };
+            return ditherPhase();
+          }
+          var c = combos[i++];
+          say('🎨 识别画手颜色设置中（' + i + '/' + combos.length + '）…');
+          var preSig = styleCanvasSig();
+          styleSetSelect(trigs.pal, c[0], function (ok1) {
+            styleSetSelect(trigs.mode, c[1], function (ok2) {
+              if (!ok1 || !ok2 || aborted()) return stepCombo(); // 切换失败：该组合不计分
+              styleWaitRender(preSig, function () {
+                var rgba = styleSnapshot();
+                if (rgba && !aborted()) {
+                  var r = styleScan(tpl, tTiles, best.dx, best.dy, G, rgba);
+                  if (r.rate > bestR.rate + 0.005) bestR = { rate: r.rate, p: c[0], m: c[1], isBase: false, ditherOn: bestR.ditherOn };
+                }
+                setTimeout(stepCombo, 30);
+              });
+            });
+          });
+        }
+        // 抖动开关（label.dithering > input[type=checkbox]）：在当前最优组合上试切一次
+        function ditherPhase() {
+          var inp = null;
+          try { inp = document.querySelector('label.dithering input[type="checkbox"]'); } catch (e) {}
+          if (!inp || aborted()) return wrapup();
+          var want = !inp.checked;
+          say('🎨 识别画手颜色设置中：试抖动' + (want ? '开' : '关') + '…');
+          var preSig = styleCanvasSig();
+          try { inp.click(); } catch (e) { return wrapup(); }
+          styleWaitRender(preSig, function () {
+            var rgba = styleSnapshot();
+            var keep = false;
+            if (rgba && !aborted()) {
+              var r = styleScan(tpl, tTiles, best.dx, best.dy, G, rgba);
+              keep = r.rate > bestR.rate + STYLE_MARGIN;
+              if (keep) bestR = { rate: r.rate, p: bestR.p, m: bestR.m, isBase: false, ditherOn: want };
+            }
+            if (!keep) { try { inp.click(); } catch (e) {} } // 切回
+            setTimeout(wrapup, 200);
+          });
+        }
+        function setDither(val, cb) {
+          var inp = null;
+          try { inp = document.querySelector('label.dithering input[type="checkbox"]'); } catch (e) {}
+          if (!inp || inp.checked === val) return cb();
+          var preSig = styleCanvasSig();
+          try { inp.click(); } catch (e) { return cb(); }
+          styleWaitRender(preSig, cb);
+        }
+        function wrapup() {
+          if (aborted()) { ST.styleBusy = false; return; }
+          function finishMsg(improved) {
+            if (improved) {
+              say('🎨 已按已画内容自动匹配官方颜色设置：色板「' + (palTexts[bestR.p] || '?') +
+                '」· 模式「' + (modeTexts[bestR.m] || '?') + '」' +
+                (dither0 !== null && bestR.ditherOn !== dither0 ? '· 抖动' + (bestR.ditherOn ? '开' : '关') + ' ' : '') +
+                '（已画吻合 ' + Math.round(base.rate * 100) + '%→' + Math.round(bestR.rate * 100) +
+                '%）——官方「应用」会随模板保存');
+            } else {
+              say('🎨 已实测 ' + (combos.length + 1) + ' 种颜色设置组合：当前设置与已画内容最吻合（' +
+                Math.round(base.rate * 100) + '%）');
+            }
+          }
+          if (!bestR.isBase) {
+            // 收口到最优组合：切换后等重渲染，再强制重快照刷新参照层与统计。
+            // 须先释放 styleBusy 再 syncEditOverlay（周期快照守卫会跳过识别中的快照）
+            var preSig = styleCanvasSig();
+            styleSetSelect(trigs.pal, bestR.p, function () {
+              styleSetSelect(trigs.mode, bestR.m, function () {
+                setDither(bestR.ditherOn === true, function () {
+                  if (aborted()) { ST.styleBusy = false; return; }
+                  styleWaitRender(preSig, function () {
+                    ST.styleBusy = false;
+                    var t = ST.editTile;
+                    if (t) { t.snapSig = null; editSnapT = 0; syncEditOverlay(); }
+                    finishMsg(true);
+                  });
+                });
+              });
+            });
+          } else {
+            // 无更优组合：测试把 canvas 留在最后一个候选（或试开的抖动）上，切回原组合
+            styleSetSelect(trigs.pal, curP, function () {
+              styleSetSelect(trigs.mode, curM, function () {
+                setDither(dither0 === true, function () {
+                  ST.styleBusy = false;
+                  finishMsg(false);
+                });
+              });
+            });
+          }
+        }
+        stepCombo();
+      });
+    });
   }
 
   // ---------------- 模板元数据（localStorage['template-overlays']） ----------------
@@ -2313,7 +2591,7 @@
     if (b) b.textContent = '清校准';
     b = hud.querySelector('#wpAC-cal');
     if (b) {
-      b.textContent = ST.calibBusy ? '⏳ 校准中' : '🎯 校准';
+      b.textContent = ST.styleBusy ? '⏳ 识别中' : (ST.calibBusy ? '⏳ 校准中' : '🎯 校准');
       b.className = 'wpAC-btn' + (ST.calib && ST.calib.match >= CALIB_MIN_MATCH ? ' on' : '');
     }
     b = hud.querySelector('#wpAC-apply');

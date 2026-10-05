@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.5.5', SRC.includes('// @version      2.5.5'));
+check('版本 2.6.0', SRC.includes('// @version      2.6.0'));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -669,7 +669,7 @@ check('精搜两级（step4 ±8 → step1 ±3）', SRC.includes('fy += 4') && SR
 check('终点守门 calibFinish', SRC.includes('function calibFinish(tpl, tTiles, samples, editMode, G, best, bg)'));
 check('fullScan 走网格', SRC.includes('function fullScan(tpl, tTiles, dx, dy, G)'));
 check('假峰显著性守门三档 calibSignificant', SRC.includes('function calibSignificant(m, bg)') && SRC.includes('m >= 0.4 && m - bg >= 0.12') && SRC.includes('m >= 0.25 && m - bg >= 0.18') && SRC.includes('editMode ? calibSignificant(mFull, bg)'));
-check('拒绝缓存强制采纳 ST.calibForce', SRC.includes('ST.calibForce = best && editMode') && SRC.includes("Date.now() - f.t < 120000") && SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true)'));
+check('拒绝缓存强制采纳 ST.calibForce', SRC.includes('ST.calibForce = best && editMode') && SRC.includes("Date.now() - f.t < 120000") && SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('clearCalib 清强制采纳缓存', SRC.includes('ST.calib = null; ST.calibMsg = null; ST.calibForce = null;'));
 check('颜色容差匹配（网格 129..191 编码 + palTol 表）', SRC.includes('128 + nearestPaletteCached') && SRC.includes('function palTolHit(a, b)') && SRC.includes('palTolHit(s.pi, v - 128)') && SRC.includes('palTolHit(s.pi, v)') && SRC.includes('palTolHit(pi, v - 128)') && SRC.includes('palTolHit(pi, v)'));
 check('编辑模式失败清校准（拆掉旧假峰平移）', SRC.includes('if (editMode) clearCalib();'));
@@ -983,6 +983,106 @@ console.log('== E9: 容差匹配与放宽守门 ==');
   // 用户场景：40% 真峰 + 低背景 → 第一档放行（v2.5.4 拒 → v2.5.5 收）
   check('用户场景 0.40/0.15 → 放行', sig(0.40, 0.15));
   check('用户场景 0.40/0.25 → 放行（差 0.15≥0.12）', sig(0.40, 0.25));
+}
+
+// ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
+console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
+// 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
+check('版本 2.6.0', SRC.includes('// @version      2.6.0'));
+check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
+check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
+check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
+check('已画样本门槛 30', SRC.includes('var STYLE_MIN_PAINTED = 30;'));
+check('当前设置吻合率 ≥0.92 不动 UI', SRC.includes('var STYLE_SKIP_RATE = 0.92;'));
+check('切换终门 STYLE_MARGIN=0.04', SRC.includes('var STYLE_MARGIN = 0.04;'));
+check('扫描追踪 0.005 + 终门 0.04 双阈值', SRC.includes('r.rate > bestR.rate + 0.005') && SRC.includes('bestR.rate < base.rate + STYLE_MARGIN'));
+check('识别中禁点校准（防重入打乱实测序列）', SRC.includes('if (ST.calibBusy || ST.styleBusy) return;'));
+check('识别中暂停周期重快照（中间候选不写 t.rgba）', SRC.includes('&& !ST.styleBusy) {'));
+check('refreshCalibStats 同步 match（「应用对齐」按钮门槛）', SRC.includes('c.match = stat.done + stat.wrong > 0 ? stat.done / (stat.done + stat.wrong) : 0;'));
+check('抖动开关 class 锚点定位（语言无关）', SRC.includes('label.dithering input[type="checkbox"]'));
+check('菜单项按 fieldset 配对（两组下拉互不串扰）', SRC.includes("trig.closest('fieldset')"));
+check('当前选中项读 aria-checked（菜单文案本地化无关）', SRC.includes("getAttribute('aria-checked') === 'true'"));
+check('无更优组合时还原原设置', SRC.includes('styleSetSelect(trigs.pal, curP, function () {'));
+check('收口后强制重快照（snapSig 置空）', SRC.includes('t.snapSig = null; editSnapT = 0; syncEditOverlay();'));
+check('识别完成先释放 styleBusy 再快照（否则被守卫跳过）', SRC.indexOf('ST.styleBusy = false;\n                    var t = ST.editTile;') > 0);
+check('HUD 按钮识别中状态', SRC.includes("ST.styleBusy ? '⏳ 识别中'"));
+
+// ---------- 复刻 styleScan：精确吻合率（逐行对照源码） ----------
+function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
+  const fdx = dx / WORLD_PX, fdy = dy / WORLD_PX;
+  let painted = 0, exact = 0;
+  for (const tt of tilesS) {
+    const src = ov || tt.rgba;
+    if (!tt.cw || !src) continue;
+    const mxBase = tplS.mx0 + tt.TL[0], mxStep = (tt.TR[0] - tt.TL[0]) / tt.cw;
+    const myBase = tplS.my0 + tt.TL[1], myStep = (tt.BL[1] - tt.TL[1]) / tt.ch;
+    const step = Math.max(1, Math.round(Math.sqrt(tt.cw * tt.ch / 12000)));
+    for (let y = 0; y < tt.ch; y += step) {
+      const wy = Math.floor((myBase + (y + 0.5) * myStep + fdy) * WORLD_PX);
+      for (let x = 0; x < tt.cw; x += step) {
+        const o = (y * tt.cw + x) * 4;
+        if (src[o + 3] < 200) continue;
+        const v = gridAt(Gs, Math.floor((mxBase + (x + 0.5) * mxStep + fdx) * WORLD_PX), wy);
+        if (!v) continue;
+        painted++;
+        const pi = paintKeyMap.get((src[o] << 16) | (src[o + 1] << 8) | src[o + 2]) || 255;
+        if (v < 64 && v === pi) exact++;
+      }
+    }
+  }
+  return { painted, exact, rate: painted ? exact / painted : 0 };
+}
+{
+  // 场景：模板 100×100 在世界 (2500000,1500000)，画布同位置已画满（δ=0）。
+  // 画手风格 = 红/蓝四象限（调色板 7/19）；用户当前设置渲染出 深红/鲑红（33/34）→ 基线 0%；
+  // 正确组合渲染 红/蓝 → 100%。择优应选后者。
+  const tplS = {
+    id: 't10', w: 100, h: 100,
+    mx0: 2500000 / WORLD_PX, mx1: (2500000 + 100) / WORLD_PX,
+    my0: 1500000 / WORLD_PX, my1: (1500000 + 100) / WORLD_PX
+  };
+  const wf = 100 / WORLD_PX;
+  const mkTex = (c0, c1) => {
+    const t = { TL: [0, 0], TR: [wf, 0], BR: [wf, wf], BL: [0, wf], cw: 100, ch: 100, rgba: new Uint8Array(100 * 100 * 4), tplId: 't10' };
+    for (let y = 0; y < 100; y++) for (let x = 0; x < 100; x++) {
+      const c = (x < 50) !== (y < 50) ? c0 : c1;
+      const o = (y * 100 + x) * 4;
+      t.rgba[o] = c[0]; t.rgba[o + 1] = c[1]; t.rgba[o + 2] = c[2]; t.rgba[o + 3] = 255;
+    }
+    return t;
+  };
+  const texA = mkTex(PALETTE[33], PALETTE[34]); // 用户当前（错）组合的渲染
+  const texB = mkTex(PALETTE[7], PALETTE[19]);  // 画手（对）组合的渲染
+  const w = TILE_PX, h = TILE_PX, data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < 100; y++) for (let x = 0; x < 100; x++) {
+    const c = (x < 50) !== (y < 50) ? PALETTE[7] : PALETTE[19]; // 已画 = 红/蓝
+    const o = (y * w + x) * 4; // 瓦片 (2500,1500) 局部坐标 = 世界像素 - (2500000,1500000)
+    data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
+  }
+  storeMapTile(2500, 1500, { w, h, data });
+  const pad = 60;
+  const G10 = buildGrid(2500000 - pad, 1500000 - pad, 2500000 + 100 + pad, 1500000 + 100 + pad);
+  const rA = styleScanSim(tplS, [texA], 0, 0, G10);
+  const rB = styleScanSim(tplS, [texB], 0, 0, G10);
+  check('错误组合渲染 → 精确吻合 0%（10000 已画全不命中）', rA.painted === 10000 && rA.exact === 0 && rA.rate === 0, JSON.stringify(rA));
+  check('正确组合渲染 → 精确吻合 100%', rB.painted === 10000 && rB.exact === 10000 && rB.rate === 1, JSON.stringify(rB));
+  check('基线 0% < 0.92 → 触发识别', rA.rate < 0.92 && rA.painted >= 30);
+  // 129+（非调色板已画）与 255 兜底编码必不算精确命中
+  G10.grid[(1500000 + 3 - G10.gy0) * G10.gw + (2500000 + 3 - G10.gx0)] = 131;
+  G10.grid[(1500000 + 4 - G10.gy0) * G10.gw + (2500000 + 4 - G10.gx0)] = 255;
+  const rC = styleScanSim(tplS, [texB], 0, 0, G10);
+  check('非调色板/兜底编码像素不计入精确命中', rC.exact === 9998 && rC.rate < 1, JSON.stringify(rC));
+  // 择优决策：候选须比基线高 STYLE_MARGIN 才切换；0.005 只用于扫描期追踪最高分
+  const pick = (baseRate, candRates) => {
+    let best = { rate: baseRate, isBase: true };
+    for (const r of candRates) if (r > best.rate + 0.005) best = { rate: r, isBase: false };
+    if (!best.isBase && best.rate < baseRate + 0.04) best = { rate: baseRate, isBase: true };
+    return best;
+  };
+  check('候选 0.9 vs 基线 0.0 → 切换', pick(0.0, [0.9]).isBase === false && pick(0.0, [0.9]).rate === 0.9);
+  check('候选 0.53 vs 基线 0.50（差 0.03<0.04）→ 还原不动', pick(0.50, [0.53]).isBase === true);
+  check('候选 0.55 vs 基线 0.50（差 0.05≥0.04）→ 切换', pick(0.50, [0.55]).isBase === false);
+  check('多候选取最高分', pick(0.0, [0.4, 0.7, 0.6]).rate === 0.7);
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');

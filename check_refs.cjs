@@ -6,26 +6,32 @@ const pairs = [
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
-  ['ST.calib', 89], ['ST.mapTiles', 14], ['ST.calibMsg', 19], ['ST.progRev', 5],
-  ['runCalibrate', 2], ['fullScan', 5], ['scoreOffset', 2], ['canvasPixelAt', 7],
+  ['ST.calib', 96], ['ST.mapTiles', 14], ['ST.calibMsg', 25], ['ST.progRev', 5],
+  ['runCalibrate', 2], ['fullScan', 6], ['scoreOffset', 2], ['canvasPixelAt', 7],
   ['applyCalibToStorage', 3], ['clearCalib', 5], ['refreshCalibStats', 3],
   ['parseTileUrl', 2], ['decodeTile', 3], ['storeMapTile', 2], ['patchFetch', 2],
   ['isPainted', 3], ['sameColor', 2], ['texPxMerc', 3],
-  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 48],
+  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 52],
   // v2.5.5 容差匹配 + 三档守门 + 强制采纳
   ['palTolHit', 5], ['nearestPaletteCached', 2], ['calibSignificant', 3],
-  ['acceptCalib', 3], ['ST.calibForce', 5], ['NEAREST_MAP', 5], ['PAL_TOL', 6],
+  ['acceptCalib', 4], ['ST.calibForce', 5], ['NEAREST_MAP', 5], ['PAL_TOL', 6],
   // v2.5.3 快查网格 + 阶梯搜索 + 假峰守门
-  ['paintIdxMap', 4], ['gridAt', 3], ['fillGridTile', 2], ['ensurePaintGrid', 3],
+  ['paintIdxMap', 5], ['gridAt', 4], ['fillGridTile', 2], ['ensurePaintGrid', 3],
   ['scoreBatch', 5], ['calibSearchPhases', 2], ['refineAndFinish', 2],
   ['calibFinish', 3], ['calibSort', 5], ['finishCalib', 6], ['CALIB_STAGES', 2],
   // v2.5.1 编辑中模板（live 虚拟 bounds）
   ['rpUnproject', 3], ['syncLiveTemplates', 3], ['scheduleLiveSync', 2],
   ['isLiveId', 8], ['buildTplList', 5], ['ST.liveTpls', 10], ['attachUnbound', 3],
   // v2.5.2 放置编辑会话（DOM overlay）+ 主动补抓
-  ['syncEditOverlay', 5], ['ensureMapTiles', 2], ['editOverlayEl', 2],
-  ['LIVE_ID', 5], ['ST.editTile', 8], ['editBaseLoc', 3], ['ST.persistT', 3],
-  ['ST.calibScreenScale', 3], ['editSnapT', 5], ['readEditScalePct', 2]
+  ['syncEditOverlay', 7], ['ensureMapTiles', 2], ['editOverlayEl', 5],
+  ['LIVE_ID', 6], ['ST.editTile', 10], ['editBaseLoc', 3], ['ST.persistT', 3],
+  ['ST.calibScreenScale', 3], ['editSnapT', 6], ['readEditScalePct', 2],
+  // v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优）
+  ['detectColorStyle', 2], ['ST.styleBusy', 11], ['styleFindTriggers', 2],
+  ['styleMenuItems', 3], ['styleOpenMenu', 4], ['styleSetSelect', 7],
+  ['styleCanvasSig', 6], ['styleWaitRender', 5], ['styleSnapshot', 4],
+  ['styleScan', 4], ['STYLE_MIN_PAINTED', 2], ['STYLE_SKIP_RATE', 2],
+  ['STYLE_MARGIN', 4], ['label.dithering', 4]
 ];
 let bad = 0;
 for (const [k, want] of pairs) {
