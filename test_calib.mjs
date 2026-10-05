@@ -646,5 +646,271 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
   check('无 persist → 不迁移（live id 保留，重开编辑器自动接上）', mig2 === null && calib.tplId === 'wpAC-live');
 }
 
+// ================= v2.5.3 快查网格 + 金字塔搜索 + 假峰守门 =================
+// 实测教训（v2.5.2）：编辑会话大范围搜索 5000 万次 canvasPixelAt 冻结主线程 30s+；
+// 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
+
+console.log('== E5: v2.5.3 源码一致 ==');
+check('版本 2.5.3', SRC.includes('// @version      2.5.3'));
+check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
+check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
+check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
+check('网格构建 fillGridTile', SRC.includes('function fillGridTile(G, t, im)'));
+check('网格按需构建+缓存 ensurePaintGrid', SRC.includes('function ensurePaintGrid(wx0, wy0, wx1, wy1, noBuild, cb)'));
+check('scoreOffset 走网格索引比较', SRC.includes('gridAt(G, s.wx + dx, s.wy + dy)') && SRC.includes('v === s.pi'));
+check('样本调色板索引预计算', SRC.includes('s0.pi = keyMap.get((s0.r << 16) | (s0.g << 8) | s0.b) || 255;'));
+check('scoreBatch 分片让出主线程', (SRC.match(/setTimeout\(step, 0\)/g) || []).length >= 2);
+check('金字塔搜索 calibSearchPhases', SRC.includes('function calibSearchPhases(tpl, tTiles, samples, editMode, G, rng)'));
+check('阶梯搜索半径表（±96/±288/±1120）', SRC.includes('{ r: 96, s: 4, sub: 3000 },') && SRC.includes('{ r: 288, s: 8, sub: 3000 },') && SRC.includes('{ r: 1120, s: 16, sub: 4000, refine: 12 }'));
+check('编辑基准优先 localStorage 同尺寸模板 bounds', SRC.includes('ot.originalWidth !== cv.width || ot.originalHeight !== cv.height'));
+check('精搜两级（step4 ±8 → step1 ±3）', SRC.includes('fy += 4') && SRC.includes('var fineB'));
+check('终点守门 calibFinish', SRC.includes('function calibFinish(tpl, tTiles, samples, editMode, G, best, bg)'));
+check('fullScan 走网格', SRC.includes('function fullScan(tpl, tTiles, dx, dy, G)'));
+check('假峰显著性守门（高匹配且高于背景）', SRC.includes('mFull >= 0.5 && mFull - bg >= 0.15') && SRC.includes('mFull >= 0.35 && mFull - bg >= 0.3'));
+check('编辑模式失败清校准（拆掉旧假峰平移）', SRC.includes('if (editMode) clearCalib();'));
+check('calibBusy 在终点释放', SRC.includes('function finishCalib() { ST.calibBusy = false; updateHud(); }'));
+check('refreshCalibStats 复用网格不现建', SRC.includes('Math.ceil(cy + halfH + pad), true, function (G)'));
+
+// ---------- 复刻：调色板索引表 + 网格构建/查询 ----------
+const PAL_SIM = { 1: [237, 28, 36], 2: [64, 147, 228], 3: [165, 14, 30], 4: [250, 128, 114], 5: [255, 255, 255] };
+const paintKeyMap = new Map();
+for (const k in PAL_SIM) { const c = PAL_SIM[k]; paintKeyMap.set((c[0] << 16) | (c[1] << 8) | c[2], +k); }
+function gridAt(G, wx, wy) {
+  const x = wx - G.gx0, y = wy - G.gy0;
+  if (x < 0 || y < 0 || x >= G.gw || y >= G.gh) return 0;
+  return G.grid[y * G.gw + x];
+}
+function fillGridTile(G, t, im) {
+  const bx = t.x * TILE_PX - G.gx0, by = t.y * TILE_PX - G.gy0;
+  let painted = 0;
+  for (let y = 0; y < t.h; y++) {
+    const ro = y * t.w * 4, gi = (by + y) * G.gw + bx;
+    for (let x = 0; x < t.w; x++) {
+      const o = ro + x * 4;
+      if (t.data[o + 3] < 128) continue;
+      G.grid[gi + x] = im.get((t.data[o] << 16) | (t.data[o + 1] << 8) | t.data[o + 2]) || 255;
+      painted++;
+    }
+  }
+  G.painted += painted;
+}
+
+console.log('== E6: 快查网格构建与查询 ==');
+{
+  // 瓦片 (3000,2000)：3 个已涂像素（2 个调色板色 + 1 个调色板外）+ 1×1 占位瓦片
+  const w = TILE_PX, h = TILE_PX, data = new Uint8ClampedArray(w * h * 4);
+  const put = (x, y, c, a) => { const o = (y * w + x) * 4; data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = a; };
+  put(456, 123, PAL_SIM[1], 255);
+  put(457, 123, PAL_SIM[2], 255);
+  put(458, 123, [12, 34, 56], 255);   // 调色板外 → 网格 255
+  put(459, 123, PAL_SIM[1], 64);      // alpha<128 → 未涂
+  const gx0 = 3000 * TILE_PX, gy0 = 2000 * TILE_PX, gw = TILE_PX, gh = TILE_PX;
+  const G = { gx0, gy0, gw, gh, grid: new Uint8Array(gw * gh), painted: 0 };
+  fillGridTile(G, { x: 3000, y: 2000, w, h, data }, paintKeyMap);
+  check('已涂调色板色 → 索引', gridAt(G, gx0 + 456, gy0 + 123) === 1);
+  check('第二色 → 各自索引', gridAt(G, gx0 + 457, gy0 + 123) === 2);
+  check('调色板外已涂 → 255', gridAt(G, gx0 + 458, gy0 + 123) === 255);
+  check('alpha<128 视为未涂 → 0', gridAt(G, gx0 + 459, gy0 + 123) === 0);
+  check('未涂区域 → 0', gridAt(G, gx0 + 100, gy0 + 100) === 0);
+  check('网格外 → 0', gridAt(G, gx0 - 1, gy0) === 0 && gridAt(G, gx0 + gw, gy0) === 0);
+  check('painted 计数 = 3', G.painted === 3, G.painted);
+  // 1×1 占位瓦片（海洋）不炸
+  const G2 = { gx0: 0, gy0: 0, gw: TILE_PX, gh: TILE_PX, grid: new Uint8Array(TILE_PX * TILE_PX), painted: 0 };
+  fillGridTile(G2, { x: 0, y: 0, w: 1, h: 1, data: new Uint8ClampedArray(4) }, paintKeyMap);
+  check('1×1 占位瓦片安全', G2.painted === 0);
+  // 相邻瓦片写入基址正确
+  const G3 = { gx0: 3000 * TILE_PX, gy0: 2000 * TILE_PX, gw: 2 * TILE_PX, gh: TILE_PX, grid: new Uint8Array(2 * TILE_PX * TILE_PX), painted: 0 };
+  const d2 = new Uint8ClampedArray(4); d2[0] = 237; d2[1] = 28; d2[2] = 36; d2[3] = 255;
+  fillGridTile(G3, { x: 3001, y: 2000, w: 1, h: 1, data: d2 }, paintKeyMap);
+  check('相邻瓦片落位正确（跨瓦片连续）', gridAt(G3, 3001 * TILE_PX, 2000 * TILE_PX) === 1,
+    'val=' + gridAt(G3, 3001 * TILE_PX, 2000 * TILE_PX));
+}
+
+// ---------- 阶梯搜索复刻（v2.5.3：半径分级 × 步长放大 × 显著性命中即停） ----------
+function scoreOffsetG(valid, dx, dy, subStep, G) {
+  let hit = 0, n = 0;
+  for (let i = 0; i < valid.length; i += subStep) {
+    const s = valid[i];
+    const v = gridAt(G, s.wx + dx, s.wy + dy);
+    if (!v) continue;
+    n++;
+    if (v === s.pi) hit++;
+  }
+  return n >= 8 ? hit / n : 0;
+}
+const calibSort = (a, b) => {
+  const d = b.m - a.m;
+  if (d > 0.005) return 1;
+  if (d < -0.005) return -1;
+  return (Math.abs(a.dx) + Math.abs(a.dy)) - (Math.abs(b.dx) + Math.abs(b.dy));
+};
+const STAGES = [
+  { r: 96, s: 4, sub: 3000 },
+  { r: 288, s: 8, sub: 3000 },
+  { r: 1120, s: 16, sub: 4000, refine: 12 }
+];
+function stageSearch(samples, G, stages) {
+  let si = 0;
+  while (si < stages.length) {
+    const st = stages[si++];
+    const span = Math.ceil(st.r / st.s);
+    const pts = [];
+    for (let dy = -span; dy <= span; dy++) for (let dx = -span; dx <= span; dx++) pts.push([dx * st.s, dy * st.s]);
+    pts.push([0, 0]);
+    let res = pts.map(([dx, dy]) => ({ dx, dy, m: scoreOffsetG(samples, dx, dy, Math.max(1, Math.floor(samples.length / st.sub)), G) }));
+    res.sort(calibSort);
+    let bg = 0;
+    for (const r of res) if (Math.abs(r.dx - res[0].dx) > 96 || Math.abs(r.dy - res[0].dy) > 96) { if (r.m > bg) bg = r.m; }
+    const cand = res[0];
+    const significant = !!cand && (cand.m >= 0.5 && cand.m - bg >= 0.15 || cand.m >= 0.35 && cand.m - bg >= 0.3);
+    if (!significant && si < stages.length) continue; // 不显著 → 下一级
+    // 精搜收口：编辑大半径级先邻域细化（±16 步长 8）→ step4 ±8 → step1 ±3
+    let seed = cand;
+    if (st.refine) {
+      const seen = {}, rp = [];
+      for (let my = -2; my <= 2; my++) for (let mx = -2; mx <= 2; mx++) {
+        const px = seed.dx + mx * 8, py = seed.dy + my * 8, k = px + ',' + py;
+        if (!seen[k]) { seen[k] = 1; rp.push([px, py]); }
+      }
+      let rr = rp.map(([dx, dy]) => ({ dx, dy, m: scoreOffsetG(samples, dx, dy, Math.max(1, Math.floor(samples.length / 20000)), G) }));
+      rr.sort(calibSort);
+      if (rr[0] && rr[0].m >= seed.m - 0.005) seed = rr[0];
+    }
+    const subF = Math.max(1, Math.floor(samples.length / 20000));
+    const fineA = [];
+    for (let fy = -8; fy <= 8; fy += 4) for (let fx = -8; fx <= 8; fx += 4) fineA.push([seed.dx + fx, seed.dy + fy]);
+    let resA = fineA.map(([dx, dy]) => ({ dx, dy, m: scoreOffsetG(samples, dx, dy, subF, G) }));
+    resA.sort(calibSort);
+    const fineB = [];
+    for (const t of resA.slice(0, 3)) for (let gy = -3; gy <= 3; gy++) for (let gx = -3; gx <= 3; gx++) fineB.push([t.dx + gx, t.dy + gy]);
+    let res3 = fineB.map(([dx, dy]) => ({ dx, dy, m: scoreOffsetG(samples, dx, dy, subF, G) }));
+    res3.sort(calibSort);
+    const best = res3[0] && res3[0].m >= seed.m - 0.005 ? res3[0] : seed;
+    return { best, bg };
+  }
+  return { best: null, bg: 0 };
+}
+function buildSamples(texT, tplT, step) {
+  const out = [];
+  for (let y = 0; y < texT.ch; y += step) for (let x = (step === 2 && (y & 1) ? 1 : 0); x < texT.cw; x += step) {
+    const o = (y * texT.cw + x) * 4;
+    if (texT.rgba[o + 3] < 200) continue;
+    const m = texPxMerc(texT, tplT, x, y);
+    const c = [texT.rgba[o], texT.rgba[o + 1], texT.rgba[o + 2]];
+    out.push({ r: c[0], g: c[1], b: c[2], pi: paintKeyMap.get((c[0] << 16) | (c[1] << 8) | c[2]) || 255, wx: Math.floor(m[0] * WORLD_PX), wy: Math.floor(m[1] * WORLD_PX) });
+  }
+  return out;
+}
+function buildGrid(wx0, wy0, wx1, wy1) {
+  const tx0 = Math.floor(wx0 / TILE_PX), ty0 = Math.floor(wy0 / TILE_PX);
+  const gx0 = tx0 * TILE_PX, gy0 = ty0 * TILE_PX;
+  const gw = (Math.floor(wx1 / TILE_PX) - tx0 + 1) * TILE_PX;
+  const gh = (Math.floor(wy1 / TILE_PX) - ty0 + 1) * TILE_PX;
+  const G = { gx0, gy0, gw, gh, grid: new Uint8Array(gw * gh), painted: 0 };
+  for (const k in mapTiles) fillGridTile(G, mapTiles[k], paintKeyMap);
+  return G;
+}
+
+console.log('== E7: 阶梯搜索——普通模式 (7,3) + 编辑模式大偏移 ==');
+{
+  // 普通模式：复用 C4 场景（模板 100×100，画布偏移 (7,3)）
+  const smp = buildSamples(tex, tpl, 1);
+  const pad = 56;
+  const G = buildGrid(2000000 - pad, 1000000 - pad, 2000000 + 100 + pad, 1000000 + 100 + pad);
+  const r = stageSearch(smp, G, [{ r: 48, s: 4, sub: 6000 }]);
+  check('普通模式命中 (7,3)', r.best.dx === DX && r.best.dy === DY, JSON.stringify(r.best));
+  check('普通模式匹配率 > 0.99', r.best.m > 0.99, r.best.m.toFixed(3));
+}
+// 中等细节模板（16×16 块同色、块间伪随机）：真实动漫模板由大色块+细节构成，
+// 纯噪声图案峰宽 2-4px、任何粗步长都踩不到（信息论极限），16px 块图案峰宽 ~16px
+const palVals = Object.values(PAL_SIM);
+{
+  let hs = 55555;
+  const hsh = (a, b) => (((a * 73856093) ^ (b * 19349663) ^ (hs * 2654435761)) >>> 0) % 5; // 无状态：块颜色独立于调用顺序
+  var tex2 = {
+    TL: [0, 0], TR: [wfrac, 0], BR: [wfrac, hfrac], BL: [0, hfrac],
+    cw: TPL_W, ch: TPL_H, rgba: new Uint8Array(TPL_W * TPL_H * 4), tplId: 'e7'
+  };
+  for (let y = 0; y < TPL_H; y++) for (let x = 0; x < TPL_W; x++) {
+    const c = palVals[hsh(Math.floor(x / 16), Math.floor(y / 16))];
+    const o = (y * TPL_W + x) * 4;
+    tex2.rgba[o] = c[0]; tex2.rgba[o + 1] = c[1]; tex2.rgba[o + 2] = c[2]; tex2.rgba[o + 3] = 255;
+  }
+}
+{
+  // 编辑模式：中等细节图案画在基准以 (-1108, 900)（非步长倍数，考验逐级收口）
+  delete mapTiles['2000,1000']; // 清掉 C4 成品瓦片：同图案两份是信息论歧义，不在本测范围
+  const EDX = -1108, EDY = 900;
+  const w = TILE_PX, h = TILE_PX, data = new Uint8ClampedArray(w * h * 4);
+  const put = (x, y, c) => { const o = (y * w + x) * 4; data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255; };
+  // 已画区 x∈[2000000-1108, +100) → 瓦片 1998 局部 x∈[892,992)；y∈[1000900,+1000) → 局部 y∈[900,1000)
+  for (let y = 0; y < TPL_H; y++) for (let x = 0; x < TPL_W; x++) {
+    const o = (y * TPL_W + x) * 4;
+    put(892 + x, 900 + y, [tex2.rgba[o], tex2.rgba[o + 1], tex2.rgba[o + 2]]);
+  }
+  storeMapTile(1998, 1000, { w, h, data });
+  const smp = buildSamples(tex2, tpl, 1);
+  const pad = 1128;
+  const G = buildGrid(2000000 - 50 - pad, 1000000 - 50 - pad, 2000000 + 50 + pad, 1000000 + 50 + pad);
+  const t0 = Date.now();
+  const r = stageSearch(smp, G, STAGES);
+  const ms = Date.now() - t0;
+  check('编辑模式大偏移命中 (-1108,900)', r.best.dx === EDX && r.best.dy === EDY, JSON.stringify(r.best));
+  check('编辑模式匹配率 > 0.9', r.best.m > 0.9, r.best.m.toFixed(3));
+  check('背景噪声显著低于峰（守门余量存在）', r.best.m - r.bg >= 0.3, `m=${r.best.m.toFixed(3)} bg=${r.bg.toFixed(3)}`);
+  check('阶梯搜索纯计算 < 2s（1 万样本、三级全跑）', ms < 2000, ms + 'ms');
+}
+
+console.log('== E8: 假峰显著性守门 ==');
+{
+  // 场景 A：纯噪声画布（30% 随机调色板涂鸦，无成品）→ LCG 确定性
+  let seedN = 42;
+  const rnd = () => (seedN = (seedN * 1103515245 + 12345) & 0x7fffffff) / 0x80000000;
+  const w = TILE_PX, h = TILE_PX, data = new Uint8ClampedArray(w * h * 4);
+  const palVals = Object.values(PAL_SIM);
+  for (let i = 0; i < w * h * 0.30; i++) {
+    const c = palVals[Math.floor(rnd() * palVals.length)];
+    const o = Math.floor(rnd() * w * h) * 4;
+    data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
+  }
+  delete mapTiles['1998,1000']; // 隔离上一场景
+  storeMapTile(2000, 1000, { w, h, data });
+  const smp = buildSamples(tex, tpl, 1);
+  const rng = 1120, pad = rng + 8;
+  const tx0 = Math.floor((2000000 - 50 - pad) / TILE_PX), ty0 = Math.floor((1000000 - 50 - pad) / TILE_PX);
+  const gx0 = tx0 * TILE_PX, gy0 = ty0 * TILE_PX;
+  const gw = (Math.floor((2000000 + 50 + pad) / TILE_PX) - tx0 + 1) * TILE_PX;
+  const gh = (Math.floor((1000000 + 50 + pad) / TILE_PX) - ty0 + 1) * TILE_PX;
+  const G = { gx0, gy0, gw, gh, grid: new Uint8Array(gw * gh), painted: 0 };
+  for (const k in mapTiles) fillGridTile(G, mapTiles[k], paintKeyMap);
+  const rA = stageSearch(smp, G, STAGES);
+  const acceptA = (rA.best.m >= 0.5 && rA.best.m - rA.bg >= 0.15) || (rA.best.m >= 0.35 && rA.best.m - rA.bg >= 0.3);
+  check('纯噪声画布 → 守门拒绝', !acceptA, `m=${rA.best.m.toFixed(3)} bg=${rA.bg.toFixed(3)}`);
+
+  // 场景 B：真成品（中等细节图案）+ 70% 画错（手画差异大）→ 峰显著高于背景 → 命中
+  const data2 = new Uint8ClampedArray(w * h * 4);
+  const put2 = (x, y, c) => { const o = (y * w + x) * 4; data2[o] = c[0]; data2[o + 1] = c[1]; data2[o + 2] = c[2]; data2[o + 3] = 255; };
+  seedN = 1234;
+  for (let y = 0; y < TPL_H; y++) for (let x = 0; x < TPL_W; x++) {
+    const wrong = rnd() < 0.70;
+    const o = (y * TPL_W + x) * 4;
+    const c = wrong ? palVals[Math.floor(rnd() * palVals.length)] : [tex2.rgba[o], tex2.rgba[o + 1], tex2.rgba[o + 2]];
+    put2(x + DX, y + DY, c);
+  }
+  storeMapTile(2000, 1000, { w, h, data: data2 });
+  const G2 = buildGrid(2000000 - 2048, 1000000 - 2048, 2000000 + 2048, 1000000 + 2048);
+  const smpB = buildSamples(tex2, tpl, 1);
+  const rB = stageSearch(smpB, G2, [{ r: 48, s: 4, sub: 6000 }]);
+  const mB = rB.best.m;
+  check('成品 + 70% 画错 → 搜索仍命中 (7,3)', rB.best.dx === DX && rB.best.dy === DY, JSON.stringify(rB.best));
+  check('成品 + 70% 画错 → 匹配率 0.3-0.6（0.3 真色 + 0.7×1/5 撞色）', mB > 0.3 && mB < 0.6, mB.toFixed(3));
+  check('普通模式门槛 0.12 放行', mB >= 0.12);
+
+  // 场景 C：36% 假峰 + 30% 背景（实测 v2.5.2 案例）→ 两条件均不满足 → 拒绝
+  const acceptC1 = 0.36 >= 0.5 && 0.36 - 0.30 >= 0.15;
+  const acceptC2 = 0.36 >= 0.35 && 0.36 - 0.30 >= 0.3;
+  check('实测案例（m=36% bg=30%）→ 拒绝', !acceptC1 && !acceptC2);
+}
+
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);

@@ -6,12 +6,16 @@ const pairs = [
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
-  ['ST.calib', 81], ['ST.mapTiles', 13], ['ST.calibMsg', 16], ['ST.progRev', 5],
-  ['runCalibrate', 2], ['fullScan', 4], ['scoreOffset', 3], ['canvasPixelAt', 6],
-  ['applyCalibToStorage', 3], ['clearCalib', 3], ['refreshCalibStats', 2],
+  ['ST.calib', 84], ['ST.mapTiles', 14], ['ST.calibMsg', 19], ['ST.progRev', 5],
+  ['runCalibrate', 2], ['fullScan', 5], ['scoreOffset', 2], ['canvasPixelAt', 7],
+  ['applyCalibToStorage', 3], ['clearCalib', 5], ['refreshCalibStats', 3],
   ['parseTileUrl', 2], ['decodeTile', 3], ['storeMapTile', 2], ['patchFetch', 2],
-  ['isPainted', 4], ['sameColor', 4], ['texPxMerc', 3],
-  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 38],
+  ['isPainted', 3], ['sameColor', 2], ['texPxMerc', 3],
+  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 4], ['WORLD_PX', 48],
+  // v2.5.3 快查网格 + 阶梯搜索 + 假峰守门
+  ['paintIdxMap', 4], ['gridAt', 3], ['fillGridTile', 2], ['ensurePaintGrid', 3],
+  ['scoreBatch', 5], ['calibSearchPhases', 2], ['refineAndFinish', 2],
+  ['calibFinish', 3], ['calibSort', 5], ['finishCalib', 6], ['CALIB_STAGES', 2],
   // v2.5.1 编辑中模板（live 虚拟 bounds）
   ['rpUnproject', 3], ['syncLiveTemplates', 3], ['scheduleLiveSync', 2],
   ['isLiveId', 8], ['buildTplList', 5], ['ST.liveTpls', 10], ['attachUnbound', 3],
