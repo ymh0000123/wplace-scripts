@@ -2,9 +2,9 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.4.0
-// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
-// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
+// @version      2.5.0
+// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
+// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
 // @author       you
 // @match        https://wplace.live/*
 // @run-at       document-start
@@ -114,6 +114,21 @@
 
   var TILE_BYTES_BUDGET = 96 * 1024 * 1024; // 瓦片像素内存上限
 
+  // ---------------- v2.5.0 画布瓦片校准常量 ----------------
+  // 官方 season 配置（逆向 chunk_CL7mF02H.js）：{tileSize:1000, zoom:11}；
+  // 世界像素网格 = 1000 × 2^11 = 2048000（官方放置编辑器 zc(): g.tileSize*2**g.tileZoom）。
+  // 官方拉取画布像素（Bc()）：`${files}/s${season}/tiles/${x}/${y}.png`，tile(x,y) 覆盖
+  // 世界像素 [x*1000,(x+1)*1000)，从西北角 (0,0) 起——与 Mercator [0,1] 线性对应。
+  var TILE_PX = 1000, WORLD_PX = 2048000;
+  var MAP_BYTES_BUDGET = 96 * 1024 * 1024; // 地图瓦片像素内存上限
+  var CALIB_MIN_MATCH = 0.12;              // 低于此匹配率拒绝应用（已画内容不足/未对上）
+  // 官方免费色板索引（逆向 rev_templates.js u 数组，= 脚本 PALETTE 索引）
+  var FREE_COLOR_IDX = {};
+  (function () {
+    var u = [7, 8, 9, 12, 15, 18, 19, 21, 23, 24, 26, 27, 30, 31, 34, 39, 42, 43, 45, 48, 50, 52, 54, 55, 57, 59, 62];
+    for (var i = 0; i < u.length; i++) FREE_COLOR_IDX[u[i]] = 1;
+  })();
+
   // ---------------- 运行状态 ----------------
   var ST = {
     templates: [],     // 模板元数据（order 降序，预计算 Mercator 端点）
@@ -138,7 +153,15 @@
     scrRev: 0,          // 官方屏幕几何版本号（uniform 重放更新信号）
     lastScrDraw: 0,     // 最近一次官方覆盖图渲染重放成功时间（0=从未渲染）
     lastMapMove: 0,     // 最近一次用户物理视图交互（拖动/滚轮/键盘）时间
-    ovGone: false       // 官方覆盖图已停止渲染（退出覆盖模式）→ 参照层收起
+    ovGone: false,      // 官方覆盖图已停止渲染（退出覆盖模式）→ 参照层收起
+    mapTiles: {},       // 画布瓦片缓存 {"x,y": {x,y,w,h,data(Uint8ClampedArray),t}}（别人已画的真实像素）
+    mapTileBytes: 0,
+    shard: 's0',        // 官方瓦片 shard（从实际请求 URL 学习）
+    calib: null,        // 校准结果 {tplId,dwx,dwy,dmx,dmy,match,total,done,wrong,missing,baseColors,t,stale}
+    calibBusy: false,
+    calibMsg: null,     // 校准结果文案（HUD 显示）
+    progRev: 0,         // 校准状态图版本号
+    tileFetching: {}    // 主动补抓去重 {"x,y": true}
   };
 
   // ---------------- hook texImage2D：捕获覆盖图像素上传 ----------------
@@ -318,12 +341,13 @@
       try {
         var ov = RP.cur;
         if (ov !== null && ov !== undefined && ov.__wpACIsOv) {
-          if (mode === 4 && count === 6 && RP.M && RP.gotWs && RP.seq.length >= 4) {
-            var tile = rpMatchTile(RP.seq);
-            if (tile) {
-              var cv = this.canvas;
-              if (cv && cv.clientWidth > 0) {
-                var q = rpProject(RP.M, [tile.TL, tile.TR, tile.BR, tile.BL], RP.ws, cv.clientWidth, cv.clientHeight);
+            if (mode === 4 && count === 6 && RP.M && RP.gotWs && RP.seq.length >= 4) {
+              var tile = rpMatchTile(RP.seq);
+              if (tile) {
+                var cv = this.canvas;
+                if (cv && cv.clientWidth > 0) {
+                  tile.rpM = RP.M; tile.rpWs = RP.ws; // 校准偏移重放需要（参照层平移 δ 时重投影）
+                  var q = rpProject(RP.M, [tile.TL, tile.TR, tile.BR, tile.BL], RP.ws, cv.clientWidth, cv.clientHeight);
                 if (q) {
                   tile.scrQuad = q; tile.scrT = Date.now();
                   ST.scrRev = (ST.scrRev || 0) + 1;
@@ -361,6 +385,8 @@
           ST.tileBytes -= t.cw * t.ch * 4;
           t.cw = cw; t.ch = ch; t.ds = ds; t.rgba = rgba; t.tileW = tileW; t.tileH = tileH; t.t = Date.now();
           t.cv = null; // 2D 画布缓存失效，自绘层下次重建
+          t.stData = null; t.stCv = null; // 校准状态图随纹理失效
+          if (ST.calib) ST.calib.stale = true;
           ST.tileBytes += cw * ch * 4;
           ST.tilesRev++;
         }
@@ -404,6 +430,401 @@
     for (var i = 0; i < ST.tiles.length; i++) {
       if (!ST.tiles[i].tplId) attachTile(ST.tiles[i]);
     }
+  }
+
+  // ================= v2.5.0 对齐校准：别人已画内容 ↔ 官方模板 =================
+  // 逆向依据（DfWPNImQ_pretty.js 官方放置编辑器）：官方 auto-paint 的画布像素来自
+  // Bc(region)：按 `${files}/s${season}/tiles/{x}/{y}.png` 逐瓦片 fetch+解码，region 世界
+  // 像素 [px0,px0+width)×[py0,py0+height) 与瓦片 [x*1000,(x+1)*1000) 求交集拷贝。
+  // 校准 = 同官方 auto-paint 的比对思路：模板量化像素 vs 画布真实像素逐点比对，
+  // 暴力搜索偏移 δ（世界像素）使匹配率最大 → 参照层即时平移预览 + 可选写回官方 bounds。
+
+  // ---------------- Mercator ↔ 经纬度（含逆变换） ----------------
+  function mercYToLat(my) {
+    // my01 的逆：atanh(sin lat) = 2π(0.5-my) → lat = asin(tanh(π(1-2my)))
+    var s = Math.tanh(Math.PI * (1 - 2 * my));
+    return Math.asin(Math.max(-1, Math.min(1, s))) * 180 / Math.PI;
+  }
+  function lngAt(wx) { return wx / WORLD_PX * 360 - 180; }
+
+  // ---------------- hook fetch：捕获官方画布瓦片 ----------------
+  // 官方地图(maplibre raster)与放置编辑器(Bc)都用 fetch 拉瓦片；克隆响应异步解码，
+  // 不阻塞官方请求、零额外网络开销。视口滚到哪，画布真实像素就缓存到哪。
+  function parseTileUrl(url) {
+    var m = /\/files\/(s\d+)\/tiles\/(-?\d+)\/(-?\d+)\.png/.exec(url || '');
+    return m ? { shard: m[1], x: +m[2], y: +m[3] } : null;
+  }
+  function patchFetch() {
+    var orig = uw.fetch;
+    if (!orig || orig.__wpAC) return;
+    var hooked = function (input) {
+      var url = '';
+      try { url = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) {}
+      var tp = parseTileUrl(url);
+      if (tp) {
+        try {
+          var p = orig.apply(this, arguments);
+          p.then(function (resp) {
+            try {
+              resp.clone().arrayBuffer().then(function (ab) { decodeTile(ab, tp); }).catch(function () {});
+            } catch (e) {}
+          }).catch(function () {});
+          return p;
+        } catch (e) {}
+      }
+      return orig.apply(this, arguments);
+    };
+    try { hooked.__wpAC = true; } catch (e) { Object.defineProperty(hooked, '__wpAC', { value: true }); }
+    uw.fetch = hooked;
+  }
+  function decodeTile(ab, tp) {
+    ST.shard = tp.shard;
+    var key = tp.x + ',' + tp.y;
+    if (ST.mapTiles[key]) { ST.mapTiles[key].t = Date.now(); return; }
+    var blob = new Blob([ab], { type: 'image/png' });
+    var done = function (src, w, h) {
+      try {
+        var cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        var ctx = cv.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(src, 0, 0);
+        storeMapTile(tp.x, tp.y, ctx.getImageData(0, 0, w, h));
+      } catch (e) {}
+    };
+    var fallback = function () {
+      var im = new Image();
+      im.onload = function () { done(im, im.naturalWidth, im.naturalHeight); };
+      im.onerror = function () {};
+      im.src = URL.createObjectURL(blob);
+    };
+    if (uw.createImageBitmap) {
+      uw.createImageBitmap(blob).then(function (bmp) {
+        done(bmp, bmp.width, bmp.height);
+        try { if (bmp.close) bmp.close(); } catch (e) {}
+      }).catch(fallback);
+    } else fallback();
+  }
+  function storeMapTile(x, y, img) {
+    var key = x + ',' + y, old = ST.mapTiles[key];
+    if (old) ST.mapTileBytes -= old.data.length;
+    if (ST.mapTileBytes + img.data.length > MAP_BYTES_BUDGET) evictMapTiles(img.data.length);
+    ST.mapTiles[key] = { x: x, y: y, w: img.width, h: img.height, data: img.data, t: Date.now() };
+    ST.mapTileBytes += img.data.length;
+    if (ST.calib) ST.calib.stale = true; // 有新画布数据 → 进度统计可刷新
+    ST.progRev++;
+  }
+  function evictMapTiles(need) {
+    var keys = Object.keys(ST.mapTiles);
+    keys.sort(function (a, b) { return ST.mapTiles[a].t - ST.mapTiles[b].t; });
+    for (var i = 0; i < keys.length && ST.mapTileBytes + need > MAP_BYTES_BUDGET; i++) {
+      ST.mapTileBytes -= ST.mapTiles[keys[i]].data.length;
+      delete ST.mapTiles[keys[i]];
+    }
+  }
+  // 画布真实像素查询：归一化 Mercator → 世界像素 → 瓦片。无数据返回 null。
+  function canvasPixelAt(mx, my) {
+    if (!(mx >= 0 && mx <= 1 && my >= 0 && my <= 1)) return null;
+    var wx = mx * WORLD_PX, wy = my * WORLD_PX;
+    var tx = Math.floor(wx / TILE_PX), ty = Math.floor(wy / TILE_PX);
+    var t = ST.mapTiles[tx + ',' + ty];
+    if (!t) return null;
+    var px = wx - tx * TILE_PX, py = wy - ty * TILE_PX;
+    if (px < 0 || py < 0 || px >= t.w || py >= t.h) return null;
+    var o = ((py | 0) * t.w + (px | 0)) * 4;
+    return [t.data[o], t.data[o + 1], t.data[o + 2], t.data[o + 3]];
+  }
+
+  // ---------------- 已画/画错判定（与官方 auto-paint 比对完全一致） ----------------
+  // 实测官方瓦片 PNG（64 色调色板索引图，tRNS 仅索引0=alpha 0）：未涂像素 alpha=0，
+  // 已画像素 alpha=255 且 RGB 精确等于调色板色（官方 $r(): 逐字节比较 data[a..a+2]）。
+  function isPainted(c) { return c[3] >= 128; }
+  function sameColor(c, r, g, b) { return c[0] === r && c[1] === g && c[2] === b; }
+
+  // ---------------- 模板采样点（纹理像素 ↔ Mercator/画布） ----------------
+  // 模板纹理瓦片四角是"相对模板 bounds 西北角"的 Mercator 偏移，加 tpl.mx0/my0 即绝对
+  // Mercator（轴对齐 bounds 下双线性退化为线性）。status: 1=done 2=wrong 0=missing/无数据
+  function texPxMerc(tile, tpl, px, py) {
+    return [
+      tpl.mx0 + tile.TL[0] + (tile.TR[0] - tile.TL[0]) * (px + 0.5) / tile.cw,
+      tpl.my0 + tile.TL[1] + (tile.BL[1] - tile.TL[1]) * (py + 0.5) / tile.ch
+    ];
+  }
+  function collectTplTiles(tplId) {
+    var out = [];
+    for (var i = 0; i < ST.tiles.length; i++) {
+      var t = ST.tiles[i];
+      if (t.tplId === tplId) out.push(t);
+    }
+    return out;
+  }
+
+  // ---------------- 校准主流程 ----------------
+  function pickCalibTemplate() {
+    for (var i = 0; i < ST.templates.length; i++) {
+      var t = ST.templates[i];
+      if (!t.visible) continue;
+      var has = false;
+      for (var j = 0; j < ST.tiles.length; j++) {
+        if (ST.tiles[j].tplId === t.id) { has = true; break; }
+      }
+      if (has) return t;
+    }
+    return null;
+  }
+  function runCalibrate() {
+    if (ST.calibBusy) return;
+    var tpl = pickCalibTemplate();
+    if (!tpl) { ST.calibMsg = { ok: false, msg: '未找到可校准的模板瓦片（先让官方覆盖图渲染出现）', t: Date.now() }; updateHud(); return; }
+    var tTiles = collectTplTiles(tpl.id);
+    if (!tTiles.length) { ST.calibMsg = { ok: false, msg: '模板无纹理数据', t: Date.now() }; updateHud(); return; }
+    ST.calibBusy = true;
+    ST.calibMsg = { ok: null, msg: '⏳ 校准中…（对比画布已画内容）', t: Date.now() };
+    updateHud();
+    // 异步起步：让 HUD 先渲染
+    setTimeout(function () {
+      try { doCalibrate(tpl, tTiles); }
+      catch (e) { ST.calibMsg = { ok: false, msg: '校准失败：' + (e && e.message || e), t: Date.now() }; }
+      ST.calibBusy = false;
+      updateHud();
+    }, 30);
+  }
+  function doCalibrate(tpl, tTiles) {
+    // 1) 采样点：不透明模板像素 → 世界像素偏移范围。
+    //    ≤25000 像素全采样（1 像素错位在纯色区也必被踩到）；更大模板步长 2 且
+    //    奇偶行交错起点（避免均匀采样恰好跳过某列/行造成平移自相似假峰）。
+    var samples = [], step = 1;
+    var totalPx = 0;
+    for (var i = 0; i < tTiles.length; i++) totalPx += tTiles[i].cw * tTiles[i].ch;
+    if (totalPx > 25000) step = 2;
+    for (i = 0; i < tTiles.length; i++) {
+      var tt = tTiles[i];
+      for (var y = 0; y < tt.ch; y += step) {
+        for (var x = (step === 2 && (y & 1) ? 1 : 0); x < tt.cw; x += step) {
+          var o = (y * tt.cw + x) * 4;
+          if (tt.rgba[o + 3] < 200) continue;
+          samples.push({ t: tt, x: x, y: y, r: tt.rgba[o], g: tt.rgba[o + 1], b: tt.rgba[o + 2] });
+        }
+      }
+    }
+    if (!samples.length) { ST.calibMsg = { ok: false, msg: '模板纹理全透明，无可比对内容', t: Date.now() }; return; }
+    // 2) 每采样点：模板绝对像素 → Mercator → 当前画布色（δ=0 基准坐标）。
+    //    世界坐标取像素格子左上（floor），与 canvasPixelAt 的 floor 语义一致；
+    //    若用 round(中心) 会使全体采样系统性偏移 1 像素。
+    for (i = 0; i < samples.length; i++) {
+      var s = samples[i], m = texPxMerc(s.t, tpl, s.x, s.y);
+      s.mx = m[0]; s.my = m[1];
+      s.wx = Math.floor(m[0] * WORLD_PX); s.wy = Math.floor(m[1] * WORLD_PX);
+      s.cv = canvasPixelAt(m[0], m[1]);
+    }
+    // 有画布数据的采样点才携带对齐信息
+    var valid = [];
+    for (i = 0; i < samples.length; i++) if (samples[i].cv) valid.push(samples[i]);
+    if (valid.length < 24) {
+      ST.calibMsg = { ok: false, msg: '画布瓦片数据不足（把地图滚动/缩放到模板区域让官方加载瓦片，再校准）', t: Date.now() };
+      return;
+    }
+    // 3) 两级偏移搜索（δ 单位 = 世界像素）
+    //    搜索半径 ±48：覆盖手动放置的点击误差量级；模板整体放错位置时先在官方
+    //    重新放置/编辑拖到大致位置再校准。bbox（已捕获瓦片范围）只作上限截断。
+    var bbox = mapTilesBBoxForTpl(tpl);
+    var rng = Math.min(48, Math.max(bbox.maxDx, bbox.maxDy, 0));
+    var coarse = [];
+    var coarseStep = 4;
+    var coarseSpan = Math.ceil(rng / coarseStep);
+    for (var dy = -coarseSpan; dy <= coarseSpan; dy++) {
+      for (var dx = -coarseSpan; dx <= coarseSpan; dx++) {
+        coarse.push([dx * coarseStep, dy * coarseStep]);
+      }
+    }
+    coarse.push([0, 0]);
+    // 粗搜子采样（valid 均匀抽取，控制在 6000 点内）
+    var subStep = Math.max(1, Math.floor(valid.length / 6000));
+    var top = [];
+    for (i = 0; i < coarse.length; i++) {
+      var sc = scoreOffset(valid, coarse[i][0], coarse[i][1], subStep, true);
+      top.push({ dx: coarse[i][0], dy: coarse[i][1], m: sc });
+    }
+    // 匹配率相近（±0.005）视为平局 → 取 |δ| 小者（纯色区平移自相似会造出 m 相同的假峰，
+    // 真解的 |δ| 通常最小；同时避免 wrong 像素轻微惩罚真解让错位峰反超）
+    top.sort(function (a, b) {
+      var d = b.m - a.m;
+      if (d > 0.005) return 1;
+      if (d < -0.005) return -1;
+      return (Math.abs(a.dx) + Math.abs(a.dy)) - (Math.abs(b.dx) + Math.abs(b.dy));
+    });
+    // 4) 精搜：top3 邻域 ±3 步长 1（全量 valid，同平局规则）
+    var best = null;
+    var seeds = top.slice(0, 3);
+    for (i = 0; i < seeds.length; i++) {
+      for (dy = -3; dy <= 3; dy++) {
+        for (dx = -3; dx <= 3; dx++) {
+          var fx = seeds[i].dx + dx, fy = seeds[i].dy + dy;
+          var sc2 = scoreOffset(valid, fx, fy, 1, false);
+          var better = !best ||
+            sc2 > best.m + 0.005 ||
+            (sc2 > best.m - 0.005 && Math.abs(fx) + Math.abs(fy) < Math.abs(best.dx) + Math.abs(best.dy));
+          if (better) best = { dx: fx, dy: fy, m: sc2 };
+        }
+      }
+    }
+    if (!best || best.m < CALIB_MIN_MATCH) {
+      ST.calibMsg = {
+        ok: false,
+        msg: '未找到可靠对齐（最高匹配 ' + Math.round((best ? best.m : 0) * 100) + '%）：已画内容太少，或模板图案不在当前瓦片范围内',
+        t: Date.now()
+      };
+      return;
+    }
+    // 5) 以最优 δ 全量统计 + 生成状态图
+    var stat = fullScan(tpl, tTiles, best.dx, best.dy);
+    ST.calib = {
+      tplId: tpl.id, tplName: tpl.name,
+      dwx: best.dx, dwy: best.dy,
+      dmx: best.dx / WORLD_PX, dmy: best.dy / WORLD_PX,
+      match: best.m, total: stat.total, done: stat.done, wrong: stat.wrong, missing: stat.missing,
+      freeOnly: stat.freeOnly, t: Date.now(), stale: false
+    };
+    ST.progRev++;
+    var pct = Math.round(best.m * 100);
+    ST.calibMsg = {
+      ok: true,
+      msg: '🎯 对齐 δ(' + best.dx + ',' + best.dy + ') 匹配 ' + pct + '% · 已画对 ' + stat.done + ' · 画错 ' + stat.wrong + ' · 未画 ' + stat.missing +
+        (stat.freeOnly ? ' · 💡画错像素全部为免费色，色板建议用「免费颜色」' : ''),
+      t: Date.now()
+    };
+  }
+  // 匹配率评分：模板量化色 vs 画布色（δ 平移后），与官方 auto-paint 一致逐字节精确比较。
+  // 画布像素未涂（alpha=0）→ 不算分母（匹配率 = 已涂像素中的正确率，对齐信号来自已画部分）。
+  function scoreOffset(valid, dx, dy, subStep, subMode) {
+    var hit = 0, n = 0;
+    for (var i = 0; i < valid.length; i += subStep) {
+      var s = valid[i];
+      var c = canvasPixelAt((s.wx + dx) / WORLD_PX, (s.wy + dy) / WORLD_PX);
+      if (!c || !isPainted(c)) continue;
+      n++;
+      if (sameColor(c, s.r, s.g, s.b)) hit++;
+    }
+    return n >= 8 ? hit / n : 0;
+  }
+  function mapTilesBBoxForTpl(tpl) {
+    // 已捕获瓦片包围盒（世界像素）与模板 bounds 的最大对称偏移
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var k in ST.mapTiles) {
+      var t = ST.mapTiles[k];
+      var x0 = t.x * TILE_PX, y0 = t.y * TILE_PX, x1 = x0 + t.w, y1 = y0 + t.h;
+      if (x0 < minX) minX = x0; if (y0 < minY) minY = y0;
+      if (x1 > maxX) maxX = x1; if (y1 > maxY) maxY = y1;
+    }
+    if (minX === Infinity) return { maxDx: 0, maxDy: 0 };
+    var tx0 = tpl.mx0 * WORLD_PX, ty0 = tpl.my0 * WORLD_PX;
+    var tx1 = tpl.mx1 * WORLD_PX, ty1 = tpl.my1 * WORLD_PX;
+    return {
+      maxDx: Math.round(Math.max(tx0 - minX, maxX - tx1, 0)),
+      maxDy: Math.round(Math.max(ty0 - minY, maxY - ty1, 0))
+    };
+  }
+  // 最优 δ 下的全量状态统计 + per 瓦片状态图（Uint8Array: 0=无 1=done 2=wrong 3=missing）
+  function fullScan(tpl, tTiles, dx, dy) {
+    var total = 0, done = 0, wrong = 0, missing = 0, wrongFree = 0, wrongN = 0;
+    for (var i = 0; i < tTiles.length; i++) {
+      var tt = tTiles[i];
+      var st = new Uint8Array(tt.cw * tt.ch);
+      tt.stData = st; tt.stT = Date.now();
+      for (var y = 0; y < tt.ch; y++) {
+        for (var x = 0; x < tt.cw; x++) {
+          var o = (y * tt.cw + x) * 4;
+          if (tt.rgba[o + 3] < 200) continue;
+          total++;
+          var m = texPxMerc(tt, tpl, x, y);
+          var c = canvasPixelAt(m[0] + dx / WORLD_PX, m[1] + dy / WORLD_PX);
+          var stv = 0;
+          if (c) {
+            if (!isPainted(c)) { stv = 3; missing++; }
+            else if (sameColor(c, tt.rgba[o], tt.rgba[o + 1], tt.rgba[o + 2])) { stv = 1; done++; }
+            else {
+              stv = 2; wrong++;
+              wrongN++;
+              if (FREE_COLOR_IDX[nearestPaletteIdx(c[0], c[1], c[2])]) wrongFree++;
+            }
+          }
+          st[y * tt.cw + x] = stv;
+        }
+      }
+      tt.stCv = null; // 状态 canvas 惰性重建（drawOverlay）
+    }
+    return { total: total, done: done, wrong: wrong, missing: missing, freeOnly: wrongN > 0 && wrongFree === wrongN };
+  }
+  // 校准状态 canvas（叠加在参照层上：done 淡绿 / wrong 红 / missing 淡蓝）
+  function statusCanvas(tile) {
+    if (tile.stCv && tile.stCvW === tile.cw && tile.stCvH === tile.ch) return tile.stCv;
+    if (!tile.stData) return null;
+    try {
+      var cv = document.createElement('canvas');
+      cv.width = tile.cw; cv.height = tile.ch;
+      var ctx = cv.getContext('2d');
+      var img = ctx.createImageData(tile.cw, tile.ch);
+      var d = img.data, s = tile.stData;
+      for (var i = 0; i < s.length; i++) {
+        var v = s[i], o = i * 4;
+        if (v === 1) { d[o] = 36; d[o + 1] = 230; d[o + 2] = 118; d[o + 3] = 70; }
+        else if (v === 2) { d[o] = 255; d[o + 1] = 64; d[o + 2] = 64; d[o + 3] = 150; }
+        else if (v === 3) { d[o] = 80; d[o + 1] = 140; d[o + 2] = 255; d[o + 3] = 44; }
+      }
+      ctx.putImageData(img, 0, 0);
+      tile.stCv = cv; tile.stCvW = tile.cw; tile.stCvH = tile.ch;
+      return cv;
+    } catch (e) { return null; }
+  }
+
+  // ---------------- 应用对齐：写回官方 template-overlays bounds ----------------
+  // 官方 overlay store 启动时读 localStorage（placementSession 期间内存态由官方保存写回），
+  // 脚本平移 bounds 后提示刷新页面即可让官方覆盖图精确落到已画内容上。
+  function applyCalibToStorage() {
+    var c = ST.calib;
+    if (!c || !(c.match >= CALIB_MIN_MATCH)) return null;
+    var raw = '';
+    try { raw = localStorage.getItem('template-overlays') || ''; } catch (e) {}
+    if (!raw) return null;
+    var arr;
+    try { arr = JSON.parse(raw); } catch (e) { return null; }
+    if (!Array.isArray(arr)) return null;
+    var hit = false;
+    for (var i = 0; i < arr.length; i++) {
+      var t = arr[i];
+      if (!t || t.id !== c.tplId || !t.bounds) continue;
+      var b = t.bounds;
+      var wx0 = mx01(b.west) * WORLD_PX + c.dwx, wx1 = mx01(b.east) * WORLD_PX + c.dwx;
+      var wy0 = my01(b.north) * WORLD_PX + c.dwy, wy1 = my01(b.south) * WORLD_PX + c.dwy;
+      b.west = lngAt(wx0); b.east = lngAt(wx1);
+      b.north = mercYToLat(wy0 / WORLD_PX); b.south = mercYToLat(wy1 / WORLD_PX);
+      hit = true;
+    }
+    if (!hit) return null;
+    try { localStorage.setItem('template-overlays', JSON.stringify(arr)); } catch (e) { return null; }
+    ST.calib.applied = true;
+    return true;
+  }
+  function clearCalib() {
+    ST.calib = null; ST.calibMsg = null; ST.progRev++;
+    for (var i = 0; i < ST.tiles.length; i++) { ST.tiles[i].stData = null; ST.tiles[i].stCv = null; }
+  }
+  // 新画布瓦片到达 / 模板纹理更新后重算统计与状态图（不重跑偏移搜索）。
+  // 节流 2s：滚动地图时瓦片接连到达，fullScan 全像素遍历不能每帧跑；
+  // 节流期间保留 stale 标记（签名含 |cal' 持续重绘，代价仅为 drawImage）。
+  var calibStatT = 0;
+  function refreshCalibStats() {
+    var c = ST.calib;
+    if (!c) return;
+    var now = Date.now();
+    if (now - calibStatT < 2000) return;
+    calibStatT = now;
+    c.stale = false;
+    var tpl = tplById(c.tplId);
+    var tTiles = tpl ? collectTplTiles(c.tplId) : [];
+    if (!tpl || !tTiles.length) { clearCalib(); return; }
+    var stat = fullScan(tpl, tTiles, c.dwx, c.dwy);
+    c.total = stat.total; c.done = stat.done; c.wrong = stat.wrong; c.missing = stat.missing; c.freeOnly = stat.freeOnly;
+    ST.progRev++;
   }
 
   // ---------------- 模板元数据（localStorage['template-overlays']） ----------------
@@ -506,10 +927,10 @@
     if (!S.hoverMode && S.enabled && ST.tiles.length &&
         ST.press && Math.abs(ST.press.x - e.clientX) + Math.abs(ST.press.y - e.clientY) < 6) {
       var hit = pickColorAt(e.clientX, e.clientY);
-      if (hit) {
+      if (hit && hit.status !== 1) { // 已画对的像素不换色（校准状态才有 status）
         var idx = nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]);
         selectColor(idx);
-        updateHudColor(idx, hit.rgb);
+        updateHudColor(idx, hit.rgb, hit);
       }
     }
     ST.lastMapClick = { x: e.clientX, y: e.clientY, t: Date.now() };
@@ -635,7 +1056,9 @@
     }
     return null;
   }
-  // 官方几何取色：屏幕点经官方屏幕四边形仿射反解 → 源像素（与 drawOverlay 的正变换互逆，所见即所得）
+  // 官方几何取色：屏幕点经官方屏幕四边形仿射反解 → 源像素（与 drawOverlay 的正变换互逆）。
+  // 校准生效时：参照层把源像素 s' 画在官方 (u,v)+δ 处，因此反解 s'=(u,v)-δ_src；
+  // 同时用鼠标点的真实世界位置查画布已有色，返回 done/wrong/missing 状态（改正颜色的依据）。
   function pickColorAtOfficial(mxx, myy) {
     for (var i = ST.tiles.length - 1; i >= 0; i--) { // 后绘制者在上层
       var t = ST.tiles[i];
@@ -648,6 +1071,13 @@
       var dx = mxx - q[0][0], dy = myy - q[0][1];
       var u = (dx * by - dy * bx) / det, v = (dy * ax - dx * ay) / det;
       if (u < 0 || v < 0 || u >= t.cw || v >= t.ch) continue;
+      var calibHit = ST.calib && t.tplId === ST.calib.tplId;
+      if (calibHit) {
+        var dux = ST.calib.dmx / (t.TR[0] - t.TL[0]) * t.cw; // δ(Mercator) → 本瓦片源像素
+        var dvy = ST.calib.dmy / (t.BL[1] - t.TL[1]) * t.ch;
+        u -= dux; v -= dvy;
+        if (u < 0 || v < 0 || u >= t.cw || v >= t.ch) continue;
+      }
       var p = ((v | 0) * t.cw + (u | 0)) * 4;
       if (t.rgba[p + 3] < 8) continue; // 透明 → 下一瓦片/层
       var name = '覆盖图';
@@ -655,7 +1085,21 @@
         var tpl = tplById(t.tplId);
         if (tpl) name = tpl.name;
       }
-      return { rgb: [t.rgba[p], t.rgba[p + 1], t.rgba[p + 2]], name: name };
+      var status = 0, canvasRgb = null;
+      if (calibHit && tpl) {
+        // 鼠标屏幕点的真实画布位置 = 官方几何下源像素的 Mercator（u/v 已减 δ，加回即官方坐标）
+        var dux2 = ST.calib.dmx / (t.TR[0] - t.TL[0]) * t.cw;
+        var dvy2 = ST.calib.dmy / (t.BL[1] - t.TL[1]) * t.ch;
+        var mmx = tpl.mx0 + t.TL[0] + (t.TR[0] - t.TL[0]) * (u + dux2 + 0.5) / t.cw;
+        var mmy = tpl.my0 + t.TL[1] + (t.BL[1] - t.TL[1]) * (v + dvy2 + 0.5) / t.ch;
+        canvasRgb = canvasPixelAt(mmx, mmy);
+        if (canvasRgb) {
+          if (!isPainted(canvasRgb)) status = 3; // 未画（alpha=0）
+          else if (sameColor(canvasRgb, t.rgba[p], t.rgba[p + 1], t.rgba[p + 2])) status = 1; // 已画对（与官方逐字节一致）
+          else status = 2; // 画错 → 改正
+        }
+      }
+      return { rgb: [t.rgba[p], t.rgba[p + 1], t.rgba[p + 2]], name: name, status: status, canvasRgb: canvasRgb };
     }
     return null;
   }
@@ -673,8 +1117,11 @@
       var hit = pickColorAt(ST.mouse.x, ST.mouse.y);
       if (hit) {
         var idx = nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]);
-        if (S.hoverMode) selectColor(idx);
-        updateHudColor(idx, hit.rgb);
+        // 校准状态下：已画对的像素不再换色（别人已画好/自己已画过，避免无意义切换）；
+        // 画错的像素正常选目标色（指哪改哪），HUD 显示画布色对比。
+        var skip = hit.status === 1;
+        if (S.hoverMode && !skip) selectColor(idx);
+        updateHudColor(idx, hit.rgb, hit);
       } else {
         updateHudColor(0);
       }
@@ -786,7 +1233,7 @@
     var dpr = uw.devicePixelRatio || 1;
     var W = Math.round(rect.width * dpr), H = Math.round(rect.height * dpr);
     // 优先官方渲染几何（uniform 重放）：位置大小与官方覆盖图逐帧同步，无需任何手动操作
-    var auto = 0, sigParts = [W, H, S.overlay, ST.scrRev, OV.rev];
+    var auto = 0, sigParts = [W, H, S.overlay, ST.scrRev, OV.rev, ST.progRev]; // progRev：状态图版本（清校准/重算后强制重绘）
     for (var ai = 0; ai < OV.tiles.length; ai++) {
       var sq = OV.tiles[ai].src && OV.tiles[ai].src.scrQuad;
       if (sq) {
@@ -796,8 +1243,10 @@
     }
     if (auto) {
       var sig = sigParts.join('|');
+      if (ST.calib && ST.calib.stale) { sig += '|cal'; } // 校准统计过期 → 强制重绘（重算状态图）
       if (sig === ovSig) return;
       ovSig = sig;
+      if (ST.calib && ST.calib.stale) refreshCalibStats();
       if (ovCanvas.width !== W || ovCanvas.height !== H) { ovCanvas.width = W; ovCanvas.height = H; }
       ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ovCtx.clearRect(0, 0, rect.width, rect.height);
@@ -809,8 +1258,27 @@
         // 仿射重放官方 shader：TL 为原点，X 向量=(TR-TL)/cw，Y 向量=(BL-TL)/ch，每单位=1 源像素
         var ax = (q[1][0] - q[0][0]) / o.cw, ay = (q[1][1] - q[0][1]) / o.cw;
         var bx = (q[3][0] - q[0][0]) / o.ch, by = (q[3][1] - q[0][1]) / o.ch;
-        ovCtx.setTransform(dpr * ax, dpr * ay, dpr * bx, dpr * by, dpr * q[0][0], dpr * q[0][1]);
+        // 对齐校准：δ 平移参照层（官方矩阵重放 TL/TR/BR/BL + Mercator 偏移），官方覆盖图不动
+        var drawQuad = q, calibTile = ST.calib && o.src.tplId === ST.calib.tplId;
+        if (calibTile && o.src.rpM) {
+          var cq = rpProject(o.src.rpM,
+            [[o.src.TL[0] + ST.calib.dmx, o.src.TL[1] + ST.calib.dmy],
+             [o.src.TR[0] + ST.calib.dmx, o.src.TR[1] + ST.calib.dmy],
+             [o.src.BR[0] + ST.calib.dmx, o.src.BR[1] + ST.calib.dmy],
+             [o.src.BL[0] + ST.calib.dmx, o.src.BL[1] + ST.calib.dmy]],
+            o.src.rpWs, ovCanvas.clientWidth || rect.width, ovCanvas.clientHeight || rect.height);
+          if (cq) {
+            drawQuad = cq;
+            ax = (cq[1][0] - cq[0][0]) / o.cw; ay = (cq[1][1] - cq[0][1]) / o.cw;
+            bx = (cq[3][0] - cq[0][0]) / o.ch; by = (cq[3][1] - cq[0][1]) / o.ch;
+          }
+        }
+        ovCtx.setTransform(dpr * ax, dpr * ay, dpr * bx, dpr * by, dpr * drawQuad[0][0], dpr * drawQuad[0][1]);
         ovCtx.drawImage(o.cv, 0, 0);
+        if (calibTile) {
+          var scv = statusCanvas(o.src);
+          if (scv) ovCtx.drawImage(scv, 0, 0);
+        }
       }
       ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawAutoMarks();
@@ -1115,6 +1583,8 @@
       '<span class="wpAC-btn" id="wpAC-layer"></span>' +
       '<span class="wpAC-btn" id="wpAC-zin">＋</span>' +
       '<span class="wpAC-btn" id="wpAC-zout">－</span>' +
+      '<span class="wpAC-btn" id="wpAC-cal">🎯 校准</span>' +
+      '<span class="wpAC-btn" id="wpAC-apply" style="display:none;">✅ 应用对齐</span>' +
       '<span class="wpAC-btn" id="wpAC-ccal"></span>' +
       '</div>' +
       '<div id="wpAC-info" style="white-space:pre-line;margin-top:3px;">初始化…</div>' +
@@ -1135,8 +1605,20 @@
     });
     hud.querySelector('#wpAC-zin').addEventListener('click', function () { ovZoomCenter(1.15); });
     hud.querySelector('#wpAC-zout').addEventListener('click', function () { ovZoomCenter(1 / 1.15); });
+    hud.querySelector('#wpAC-cal').addEventListener('click', function () { runCalibrate(); });
+    hud.querySelector('#wpAC-apply').addEventListener('click', function () {
+      var r = applyCalibToStorage();
+      if (r) {
+        ST.calibMsg = { ok: true, msg: '✅ 已写入官方模板位置（偏移已应用）——按 F5 刷新页面后官方覆盖图即对齐到已画内容', t: Date.now() };
+        var b = hud.querySelector('#wpAC-apply');
+        if (b) b.style.display = 'none';
+      } else {
+        ST.calibMsg = { ok: false, msg: '写入失败：localStorage 中找不到该模板（联盟共享模板不受支持）', t: Date.now() };
+      }
+      updateHud();
+    });
     hud.querySelector('#wpAC-ccal').addEventListener('click', function () {
-      ST.anchor = null; ST.suspect = false; ST.viewDX = 0; ST.viewDY = 0; updateHud();
+      ST.anchor = null; ST.suspect = false; ST.viewDX = 0; ST.viewDY = 0; clearCalib(); updateHud();
     });
     hud.querySelector('#wpAC-onoff').addEventListener('click', function () {
       S.enabled = !S.enabled; saveSettings(); syncHudOnOff(); updateHud();
@@ -1218,6 +1700,17 @@
     }
     b = hud.querySelector('#wpAC-ccal');
     if (b) b.textContent = '清校准';
+    b = hud.querySelector('#wpAC-cal');
+    if (b) {
+      b.textContent = ST.calibBusy ? '⏳ 校准中' : '🎯 校准';
+      b.className = 'wpAC-btn' + (ST.calib && ST.calib.match >= CALIB_MIN_MATCH ? ' on' : '');
+    }
+    b = hud.querySelector('#wpAC-apply');
+    if (b) {
+      // 有可用校准结果且尚未写入 → 显示「应用对齐」；写入成功后收起
+      var show = !!(ST.calib && ST.calib.match >= CALIB_MIN_MATCH && !ST.calib.applied);
+      b.style.display = show ? '' : 'none';
+    }
   }
   function updateHud() {
     if (!document.body) return;
@@ -1271,16 +1764,29 @@
       }
       lines.push('覆盖图: ' + (first ? first.name : '?') + (layerCount > 1 ? ' 等 ' + layerCount + ' 层' : ''));
     }
+    // 校准状态行（对齐校准 + 颜色改正进度）
+    if (ST.calibMsg && Date.now() - ST.calibMsg.t < 120000) {
+      lines.push(ST.calibMsg.msg);
+    }
+    if (ST.calib && ST.calib.match >= CALIB_MIN_MATCH && !ST.calib.applied) {
+      lines.push('提示：对齐尚未写入——点「✅ 应用对齐」后刷新页面，官方覆盖图即落到已画内容上');
+    }
     hudInfo.textContent = lines.join('\n');
     syncHudBtns();
   }
-  function updateHudColor(idx, rgb) {
+  function updateHudColor(idx, rgb, hit) {
     if (!hudDot) return;
     if (idx) {
       hudDot.style.background = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
       var p = PALETTE[idx];
       var tail = '';
-      if (!S.hoverMode) tail = '（点击换色：点像素即换）';
+      if (hit && hit.status === 1) tail = '  ✓ 已画对，无需处理';
+      else if (hit && hit.status === 2 && hit.canvasRgb) {
+        var ci = nearestPaletteIdx(hit.canvasRgb[0], hit.canvasRgb[1], hit.canvasRgb[2]);
+        var cn = PALETTE[ci] ? PALETTE[ci][0] : '?';
+        tail = '  ⚠画布=' + cn + '（画错），指哪改哪';
+      } else if (hit && hit.status === 3) tail = '  · 未画';
+      else if (!S.hoverMode) tail = '（点击换色：点像素即换）';
       else if (ST.lastSelect && Date.now() - ST.lastSelect.t < 4000) {
         tail = ST.lastSelect.ok ? '  ' + ST.lastSelect.msg : '  ⚠' + ST.lastSelect.msg;
       }
@@ -1330,6 +1836,7 @@
 
   function start() {
     hookSetItem();
+    patchFetch();
     loadTemplates();
     refreshMenu();
     updateHud();
