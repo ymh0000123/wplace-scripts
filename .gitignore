@@ -1,0 +1,12 @@
+# 逆向产物：wplace.live 官方站点代码，禁止公开分发
+DfWPNImQ_pretty.js
+rev_*.js
+
+# 本机 CDP / 调试辅助工具，与脚本本体无关
+cdp.mjs
+eval_js.mjs
+mcp_http.mjs
+fmt.mjs
+
+# 本地扫描/工作目录
+.mimosa/
