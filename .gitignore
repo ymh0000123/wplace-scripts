@@ -10,3 +10,12 @@ fmt.mjs
 
 # 本地扫描/工作目录
 .mimosa/
+
+# 逆向产物 chunk 缓存（官方站点代码，禁止公开分发）
+rev_chunks/
+wplace_index.html
+
+# 实机调试辅助
+cua-helper.mjs
+focus-chrome.ps1
+analyze_ctx.mjs

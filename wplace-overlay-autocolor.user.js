@@ -2,9 +2,9 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.6.1
-// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
-// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
+// @version      2.7.0
+// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料不足自动暂停等待，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
+// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-pausing when charges run out; painted pixels only enter the official draft and submission is always a manual click on the official Paint button. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
 // @match        https://wplace.live/*
 // @run-at       document-start
@@ -1915,6 +1915,11 @@
     if (e.ctrlKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
       S.collapsed = !S.collapsed; saveSettings(); applyHudCollapsed(); updateHud();
     }
+    // Esc：退出框选/停止补画（官方绘画模式下 Esc 无其他绑定）
+    if (e.key === 'Escape' && BP) {
+      if (BP.phase === 'box') { bpBoxCleanup(); bpAbort(); }
+      else if (BP.phase === 'run' || BP.phase === 'confirm') bpSecondary();
+    }
   }, true);
 
   // ---------------- 取色 + 自动选色 ----------------
@@ -2004,6 +2009,7 @@
 
   function schedulePick() {
     if (ST.pickPending) return;
+    if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return; // 补画引擎的合成 mousemove 不做悬停换色
     ST.pickPending = true;
     requestAnimationFrame(function () {
       ST.pickPending = false;
@@ -2461,6 +2467,436 @@
     }, 120);
   }
 
+  // ================= 框选自动补画（v2.7.0）拟人节奏 · 手动提交 =================
+  // 官方绘画交互逆向（2026-10 bundle + 实机实证）：
+  //  - 绘画模式下单击画布 = 涂 1 像素，但官方在 map 的 click/pointerdown/touchstart 三个
+  //    入口都检查 isTrusted：合成事件会把全局 automatedClicks 置 true 并写入后续 /paint
+  //    请求的 pawtect token（服务端可见的自动化信号）——此路径禁用；
+  //  - 官方「按住 Space + 移动鼠标」连画链路：document keydown(Space) 置内部连画标志并涂下
+  //    当前点 → window mousemove 把上一点到当前点的线段逐像素写入官方草稿（这条链路
+  //    不检查 isTrusted）→ keyup(Space) 收束撤销合并。合成事件全程绕开 isTrusted 检查点；
+  //  - 草稿 = 官方 Paint 按钮上的待提交像素（颜料在提交时才真正扣减），提交由用户手动点击
+  //    官方 Paint 按钮（POST /paint 携带 pawtect token/设备密钥/CF 盾）——脚本不触碰提交流程；
+  //  - 色板按钮 click 无 isTrusted 检查（selectColor 自 v2.5.0 起长期使用）；
+  //  - 移动端 touch 路径有 isTrusted 检查 → 自动补画仅桌面精确指针可用。
+
+  var BP = null; // {phase, runs, ri, painted, missed, lastDraft, msg, box, plan}
+  var BP_STEP_PX = 4;         // 每次合成 mousemove 最多推进的世界像素（拟人步幅）
+  var BP_STEP_MS = 55;        // 步进基础间隔（实际 ±40ms 随机）
+  var BP_STROKE_MS = 260;     // 两笔之间基础间隔（±380ms 随机，偶发长停顿）
+  function bpSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  // 模板源像素 → 屏幕坐标（官方 scrQuad 仿射正变换 + 校准 δ；与 pickColorAtOfficial 互逆）
+  function bpSrcToScreen(t, px, py) {
+    var q = t.scrQuad;
+    if (!q) return null;
+    var u = px, v = py;
+    if (ST.calib && t.tplId === ST.calib.tplId) {
+      u += ST.calib.dmx / (t.TR[0] - t.TL[0]) * t.cw;
+      v += ST.calib.dmy / (t.BL[1] - t.TL[1]) * t.ch;
+    }
+    return [
+      q[0][0] + (q[1][0] - q[0][0]) * u / t.cw + (q[3][0] - q[0][0]) * v / t.ch,
+      q[0][1] + (q[1][1] - q[0][1]) * u / t.cw + (q[3][1] - q[0][1]) * v / t.ch
+    ];
+  }
+  // 模板源像素 → 画布世界像素（texPxMerc + 校准 δ；官方覆盖图偏离已画内容 δ，真实内容在 +δ 处）
+  function bpSrcToWorld(t, tpl, px, py) {
+    var m = texPxMerc(t, tpl, px, py);
+    if (ST.calib && t.tplId === ST.calib.tplId) { m[0] += ST.calib.dmx; m[1] += ST.calib.dmy; }
+    return [Math.floor(m[0] * WORLD_PX), Math.floor(m[1] * WORLD_PX)];
+  }
+  // 待画像素 → 同色同行连续线段（run）。分组键 = tile+行+色：同一模板瓦片的同一像素行内
+  // 连续 px 才合成一笔（跨瓦片不合并——各自 scrQuad 投影独立，边界处多一两笔更稳）。
+  // pixels: [{tplId, px, py, c}]；返回 [{tplId, c, py, px0, px1}]（行序蛇形：偶数行左→右）
+  function bpRunsFromPixels(pixels) {
+    var byKey = {};
+    for (var i = 0; i < pixels.length; i++) {
+      var k = pixels[i].tplId + '/' + pixels[i].py + '/' + pixels[i].c;
+      (byKey[k] = byKey[k] || []).push(pixels[i].px);
+    }
+    var runs = [];
+    for (var k2 in byKey) {
+      var parts = k2.split('/');
+      var xs = byKey[k2].sort(function (a, b) { return a - b; });
+      var s = xs[0], prev = xs[0];
+      for (var j = 1; j <= xs.length; j++) {
+        if (j < xs.length && xs[j] === prev + 1) { prev = xs[j]; continue; }
+        runs.push({ tplId: parts[0], c: Number(parts[2]), py: Number(parts[1]), px0: s, px1: prev });
+        if (j < xs.length) { s = prev = xs[j]; }
+      }
+    }
+    // 同瓦片内按 py 行序蛇形：奇数行反转段顺序并交换端点，路径来回更像手绘
+    var rows = {};
+    for (var r = 0; r < runs.length; r++) {
+      var rk = runs[r].tplId + '/' + runs[r].c;
+      (rows[rk] = rows[rk] || {})[runs[r].py] = (rows[rk][runs[r].py] || []).concat([runs[r]]);
+    }
+    var out = [];
+    Object.keys(rows).forEach(function (rk) {
+      var ys = Object.keys(rows[rk]).map(Number).sort(function (a, b) { return a - b; });
+      for (var yi = 0; yi < ys.length; yi++) {
+        var list = rows[rk][ys[yi]];
+        if (yi % 2 === 1) {
+          list.reverse();
+          for (var q = 0; q < list.length; q++) { var t2 = list[q].px0; list[q].px0 = list[q].px1; list[q].px1 = t2; }
+        }
+        for (var w = 0; w < list.length; w++) out.push(list[w]);
+      }
+    });
+    return out;
+  }
+  // 解析官方状态（实机实证）：底部按钮「Paint 115/693 (0:08)」= charges/上限（恢复倒计时）；
+  // 面板标题「Paint pixel (N)」N = 草稿像素数；按钮纯「Paint」= 有颜料无草稿；倒计时态 = 颜料 0
+  function bpNumAt(s, i) { // 从 s[i] 起读十进制数，返回 [值, 下一位置] 或 null
+    var n = 0, got = false;
+    while (i < s.length && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) { n = n * 10 + (s.charCodeAt(i) - 48); got = true; i++; }
+    return got ? [n, i] : null;
+  }
+  function bpChargesInfo() {
+    var btns = document.querySelectorAll('button');
+    var out = null;
+    for (var i = 0; i < btns.length; i++) {
+      var txt = (btns[i].textContent || '').trim();
+      if (txt.indexOf('Paint') !== 0) continue;
+      var rest = txt.slice(5).trim(); // "115/693 (0:08)" | "(0:08)" | ""
+      var p = bpNumAt(rest, 0);
+      if (p && rest.charAt(p[1]) === '/') {
+        var q = bpNumAt(rest, p[1] + 1);
+        if (q) { out = { charges: p[0], max: q[0] }; break; }
+      }
+      if (rest.indexOf('(') >= 0) { out = { charges: 0, max: 0 }; break; } // 只剩恢复倒计时 → 颜料 0
+      out = { charges: -1, max: -1 }; // 数量不显示（有颜料，具体值未知）
+      break;
+    }
+    if (!out) return null;
+    // 草稿数在面板标题「Paint pixel (N)」：textContent 读（innerText 会因布局插入换行导致匹配失败）
+    var body = document.body.textContent || '';
+    var pi = body.indexOf('Paint pixel');
+    out.draft = 0;
+    if (pi >= 0) {
+      var lp = body.indexOf('(', pi);
+      var d = lp >= 0 && lp - pi < 16 ? bpNumAt(body, lp + 1) : null; // 括号须紧跟标题（避免误匹配远处文本）
+      out.draft = d ? d[0] : 0;
+    }
+    return out;
+  }
+  function bpInjectMove(x, y) {
+    document.body.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, cancelable: true, view: uw, clientX: x, clientY: y, buttons: 1
+    }));
+  }
+  function bpInjectSpace(down) {
+    document.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {
+      code: 'Space', key: ' ', bubbles: true, cancelable: true
+    }));
+  }
+  function bpCurSelIdx() {
+    try {
+      var pr = paletteRoot();
+      var el = pr && pr.querySelector('button[aria-pressed="true"]');
+      var m = el && /^color-(\d+)$/.exec(el.id);
+      return m ? Number(m[1]) : 0;
+    } catch (e) { return 0; }
+  }
+  async function bpEnsureColor(idx) {
+    for (var k = 0; k < 3; k++) {
+      if (bpCurSelIdx() === idx) return true;
+      selectColor(idx);
+      await bpSleep(420 + Math.random() * 380);
+    }
+    return bpCurSelIdx() === idx;
+  }
+  // 画一条线段：先无键移动把官方「上一落点」带到起点（不涂），再按 Space 涂起点、
+  // 分步移动逐段涂到终点，松开 Space 收束。步幅与间隔带随机，笔间偶发长停顿。
+  async function bpStroke(run) {
+    var t = null, tpl = null;
+    for (var i = 0; i < ST.tiles.length; i++) {
+      if (ST.tiles[i].tplId === run.tplId) { t = ST.tiles[i]; break; }
+    }
+    tpl = tplById(run.tplId);
+    if (!t || !t.scrQuad || !tpl) return false;
+    var p0 = bpSrcToScreen(t, run.px0, run.py);
+    var p1 = bpSrcToScreen(t, run.px1, run.py);
+    if (!p0 || !p1) return false;
+    bpInjectMove(p0[0], p0[1]);          // 更新官方上一落点（Space 未按，不涂）
+    await bpSleep(30 + Math.random() * 60);
+    bpInjectSpace(true);                  // 按下：涂起点 1 像素
+    var dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+    var steps = Math.max(1, Math.ceil(Math.max(Math.abs(run.px1 - run.px0), 1) / BP_STEP_PX));
+    for (var s = 1; s <= steps; s++) {
+      var f = s / steps;
+      bpInjectMove(p0[0] + dx * f + (Math.random() - 0.5) * 0.6, p0[1] + dy * f + (Math.random() - 0.5) * 0.6);
+      await bpSleep(Math.max(20, BP_STEP_MS + (Math.random() - 0.5) * 80));
+    }
+    bpInjectSpace(false);                 // 松开：撤销栈收束
+    await bpSleep(60 + Math.random() * 80);
+    return true;
+  }
+  // 引擎主循环：逐色逐段执行；视图交互中/颜料不足自动等待；完成后交由用户手动提交
+  async function bpEngine() {
+    while (BP && BP.ri < BP.runs.length) {
+      if (!BP || BP.phase === 'stop') return;
+      if (BP.phase === 'pause' || BP.phase === 'wait') { await bpSleep(300); if (!BP) return; continue; }
+      var run = BP.runs[BP.ri];
+      // 视图正在被拖动/缩放：scrQuad 在动，涂了会错位 → 等静止
+      if (ST.lastMapMove && Date.now() - ST.lastMapMove < 800) {
+        BP.msg = '⏳ 等待视图静止…';
+        updateHud();
+        await bpSleep(400);
+        if (!BP) return;
+        continue;
+      }
+      if (!(await bpEnsureColor(run.c))) {
+        BP.msg = '⚠ 无法选中色 #' + run.c + '（未解锁？）——该色线段已跳过';
+        BP.skipped++;
+        updateHud();
+        BP.ri++;
+        continue;
+      }
+      var ok = await bpStroke(run);
+      if (!BP) return;
+      if (!ok) { BP.ri++; continue; }
+      var info = bpChargesInfo();
+      if (info && info.draft !== null) {
+        if (info.draft > BP.lastDraft) {
+          BP.lastDraft = info.draft;
+          BP.painted += (run.px1 - run.px0 + 1);
+          BP.missed = 0;
+        } else {
+          BP.missed++;
+          if (BP.missed >= 3) {
+            BP.phase = 'wait';
+            BP.msg = '⏸ 草稿计数未增长（颜料不足或坐标偏移）——恢复后点「▶ 继续」';
+            syncBpBtns();
+            updateHud();
+            continue;
+          }
+        }
+      }
+      BP.ri++;
+      BP.msg = '🖌 补画中 ' + BP.ri + '/' + BP.runs.length + ' 段 · 已涂约 ' + BP.painted + ' 像素';
+      updateHud();
+      // 拟人间隔：基础抖动，每 6-14 笔插入一次 0.6-1.6s 的「思考停顿」
+      var gap = BP_STROKE_MS + Math.random() * 380;
+      if (Math.random() < 0.12) gap += 600 + Math.random() * 1000;
+      await bpSleep(gap);
+      if (!BP) return;
+    }
+    if (BP && BP.phase !== 'stop') {
+      BP.phase = 'done';
+      BP.msg = '✅ 补画完成：约 ' + BP.painted + ' 像素进入官方草稿——请检查后手动点击官方 Paint 按钮提交';
+      syncBpBtns();
+      updateHud();
+    }
+  }
+  function bpAbort(msg) {
+    if (BP && BP.phase === 'box') bpBoxCleanup();
+    BP = null;
+    if (msg) { ST.calibMsg = { ok: false, msg: msg, t: Date.now() }; }
+    syncBpBtns();
+    updateHud();
+  }
+  // 主按钮（phase 分发）：进入框选 / 取消 / 开始 / 暂停 / 继续 / 复位
+  function bpPrimary() {
+    if (!BP) { bpStartBox(); return; }
+    switch (BP.phase) {
+      case 'box': bpAbort(); break;
+      case 'confirm':
+        BP.phase = 'run'; BP.msg = '';
+        syncBpBtns(); updateHud();
+        bpEngine();
+        break;
+      case 'run':
+        BP.phase = 'pause'; BP.msg = '⏸ 已暂停';
+        syncBpBtns(); updateHud();
+        break;
+      case 'pause': case 'wait':
+        BP.phase = 'run'; BP.msg = ''; BP.missed = 0;
+        syncBpBtns(); updateHud();
+        break;
+      case 'done':
+        BP = null; syncBpBtns(); updateHud();
+        break;
+    }
+  }
+  // 次按钮：停止（已涂部分保留在官方草稿，可手动提交或 Ctrl+Z 逐笔撤销）
+  function bpSecondary() {
+    if (!BP) return;
+    if (BP.phase === 'box') { bpAbort(); return; }
+    var painted = BP.painted;
+    BP = null;
+    bpBoxCleanup();
+    ST.calibMsg = { ok: false, msg: '■ 已停止补画（本次约 ' + painted + ' 像素保留在官方草稿，可手动提交）', t: Date.now() };
+    syncBpBtns();
+    updateHud();
+  }
+  function syncBpBtns() {
+    if (!hud) return;
+    var a = hud.querySelector('#wpAC-bp'), b = hud.querySelector('#wpAC-bpx');
+    if (!a) return;
+    var ph = BP && BP.phase || 'idle';
+    var main = { idle: '🖌 补画', box: '✕ 取消框选', confirm: '▶ 开始补画', run: '⏸ 暂停', pause: '▶ 继续', wait: '▶ 继续', done: '🖌 补画' }[ph] || '🖌 补画';
+    a.textContent = main;
+    a.style.background = ph === 'run' ? '#7a5a1e' : (ph === 'confirm' || ph === 'pause' ? '#2d6a4f' : '');
+    if (b) {
+      var showSec = BP && (ph === 'confirm' || ph === 'run' || ph === 'pause' || ph === 'wait');
+      b.style.display = showSec ? '' : 'none';
+      if (showSec) b.textContent = '■ 停止';
+    }
+  }
+  // 前置检查：桌面精确指针 + 官方绘画模式（色板在）+ 参照层已对齐（校准）
+  function bpPreflight() {
+    try {
+      if (!matchMedia('(pointer: fine)').matches) return '⚠ 自动补画需要桌面鼠标（移动端触摸路径官方有合成事件检测）';
+    } catch (e) {}
+    if (!paletteRoot()) return '⚠ 请先进入官方绘画模式：点击画布像素 → 面板 → Paint 按钮，让色板出现';
+    if (!ST.tiles.length) return '⚠ 未检测到覆盖图（先在 Overlay 上传模板）';
+    if (!ST.calib || ST.calib.match < CALIB_MIN_MATCH) return '⚠ 请先用「🎯 校准」对齐参照层（补画坐标以校准为准）';
+    if (!scrQuadCount()) return '⚠ 官方覆盖图未渲染：放大到覆盖图清晰可见后再试';
+    return null;
+  }
+  // ---------------- 框选（真实鼠标拖矩形，overlay 层接管输入不碰官方画布） ----------------
+  var bpBoxEl = null;
+  function bpBoxCleanup() {
+    if (bpBoxEl) { try { bpBoxEl.remove(); } catch (e) {} bpBoxEl = null; }
+  }
+  function bpStartBox() {
+    var err = bpPreflight();
+    if (err) { bpAbort(err); return; }
+    bpBoxCleanup();
+    BP = { phase: 'box', msg: '🖱 在画布上拖出要补画的矩形（Esc 取消）' };
+    syncBpBtns();
+    updateHud();
+    var el = document.createElement('div');
+    el.id = 'wpAC-bpbox';
+    el.style.cssText = 'position:fixed;inset:0;z-index:2147482999;cursor:crosshair;background:rgba(20,40,80,.08);';
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;display:none;border:1px solid #4f8cff;background:rgba(79,140,255,.15);pointer-events:none;';
+    var tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(15,18,25,.92);color:#dfe6f3;' +
+      'font:12px/1.6 system-ui,sans-serif;padding:5px 14px;border-radius:8px;pointer-events:none;';
+    tip.textContent = '拖动框选要补画的范围 · Esc 取消';
+    el.appendChild(box); el.appendChild(tip);
+    document.body.appendChild(el);
+    bpBoxEl = el;
+    var start = null;
+    function rectOf(a, b) {
+      return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    }
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      start = [e.clientX, e.clientY];
+      e.preventDefault();
+    });
+    el.addEventListener('mousemove', function (e) {
+      if (!start) return;
+      var r = rectOf(start, [e.clientX, e.clientY]);
+      box.style.display = '';
+      box.style.left = r.x0 + 'px'; box.style.top = r.y0 + 'px';
+      box.style.width = (r.x1 - r.x0) + 'px'; box.style.height = (r.y1 - r.y0) + 'px';
+    });
+    el.addEventListener('mouseup', function (e) {
+      if (!start) return;
+      var r = rectOf(start, [e.clientX, e.clientY]);
+      bpBoxCleanup();
+      if (r.x1 - r.x0 < 8 || r.y1 - r.y0 < 8) { bpAbort('框选太小（至少 8×8 像素）'); return; }
+      bpBuildPlan(r);
+    });
+  }
+  // 屏幕矩形 → 待画清单：模板像素（上层优先）→ 世界像素画布比对 → 分色分线段
+  function bpBuildPlan(rect) {
+    var pxs = [];
+    var locked = {};
+    var skippedLocked = 0;
+    for (var i = ST.tiles.length - 1; i >= 0; i--) { // 后绘制者在上层（与 pickColorAtOfficial 同序）
+      var t = ST.tiles[i];
+      if (!t.scrQuad || !t.rgba) continue;
+      var tpl = tplById(t.tplId);
+      if (!tpl) continue;
+      // 瓦片四边形 bbox 与框选矩形粗交
+      var bx0 = Math.min(q0(t), Math.min(q1(t), Math.min(q2(t), q3(t)))) - 2;
+      var bx1 = Math.max(q0(t), Math.max(q1(t), Math.max(q2(t), q3(t)))) + 2;
+      var by0 = Math.min(q0y(t), Math.min(q1y(t), Math.min(q2y(t), q3y(t)))) - 2;
+      var by1 = Math.max(q0y(t), Math.max(q1y(t), Math.max(q2y(t), q3y(t)))) + 2;
+      if (bx1 < rect.x0 || bx0 > rect.x1 || by1 < rect.y0 || by0 > rect.y1) continue;
+      for (var py = 0; py < t.ch; py++) {
+        for (var px = 0; px < t.cw; px++) {
+          var o = (py * t.cw + px) * 4;
+          if (t.rgba[o + 3] < 8) continue;
+          var sc = bpSrcToScreen(t, px, py);
+          if (!sc || sc[0] < rect.x0 || sc[0] > rect.x1 || sc[1] < rect.y0 || sc[1] > rect.y1) continue;
+          var w = bpSrcToWorld(t, tpl, px, py);
+          var cIdx = nearestPaletteCached(t.rgba[o], t.rgba[o + 1], t.rgba[o + 2]);
+          if (!cIdx) continue;
+          if (locked[cIdx] === undefined) {
+            var sw = swatchButtonById(cIdx);
+            locked[cIdx] = !sw || isLockedSwatch(sw);
+          }
+          if (locked[cIdx]) { skippedLocked++; continue; }
+          pxs.push({ tplId: t.tplId, px: px, py: py, wx: w[0], wy: w[1], c: cIdx });
+        }
+      }
+    }
+    // 上层优先去重（同世界像素保留先入=更上层）
+    var seen = {};
+    var uniq = [];
+    for (var u = 0; u < pxs.length; u++) {
+      var key = pxs[u].wx + '/' + pxs[u].wy;
+      if (seen[key]) continue;
+      seen[key] = 1;
+      uniq.push(pxs[u]);
+    }
+    if (!uniq.length) { bpAbort('框选范围内没有模板像素'); return; }
+    var wxs = uniq.map(function (p) { return p.wx; }), wys = uniq.map(function (p) { return p.wy; });
+    ensurePaintGrid(
+      Math.min.apply(null, wxs) - 2,
+      Math.min.apply(null, wys) - 2,
+      Math.max.apply(null, wxs) + 2,
+      Math.max.apply(null, wys) + 2,
+      false,
+      function (G) { bpPlanReady(uniq, G, skippedLocked); }
+    );
+  }
+  function q0(t) { return t.scrQuad[0][0]; } function q1(t) { return t.scrQuad[1][0]; }
+  function q2(t) { return t.scrQuad[2][0]; } function q3(t) { return t.scrQuad[3][0]; }
+  function q0y(t) { return t.scrQuad[0][1]; } function q1y(t) { return t.scrQuad[1][1]; }
+  function q2y(t) { return t.scrQuad[2][1]; } function q3y(t) { return t.scrQuad[3][1]; }
+  function bpPlanReady(pixels, G, skippedLocked) {
+    var need = [];
+    var undone = 0, wrong = 0;
+    for (var i = 0; i < pixels.length; i++) {
+      var p = pixels[i];
+      var cur = G ? gridAt(G, p.wx, p.wy) : 0;
+      if (cur === 0) { need.push(p); undone++; }
+      else if (cur < 64 && cur !== p.c) { need.push(p); wrong++; }
+      // 129..191（近似色已涂）视为已画：尊重画手的相邻色选择，不重涂
+    }
+    if (!need.length) {
+      bpAbort(skippedLocked ? '框选范围内无需补画（' + skippedLocked + ' 像素因颜色未解锁跳过）' : '框选范围内无需补画');
+      return;
+    }
+    // 分色分组（大色先画，减少换色次数更像人），色内按行蛇形分段
+    var byColor = {};
+    for (var j = 0; j < need.length; j++) (byColor[need[j].c] = byColor[need[j].c] || []).push(need[j]);
+    var colors = Object.keys(byColor).map(Number).sort(function (a, b) { return byColor[b].length - byColor[a].length; });
+    var runs = [];
+    for (var c = 0; c < colors.length; c++) {
+      var rr = bpRunsFromPixels(byColor[colors[c]]);
+      for (var k = 0; k < rr.length; k++) runs.push(rr[k]);
+    }
+    var totalPx = 0;
+    for (var m = 0; m < runs.length; m++) totalPx += runs[m].px1 - runs[m].px0 + 1;
+    BP = {
+      phase: 'confirm', runs: runs, ri: 0, painted: 0, skipped: skippedLocked,
+      missed: 0, lastDraft: (bpChargesInfo() || {}).draft || 0,
+      msg: '框选完成：需补画 ' + need.length + ' 像素（未涂 ' + undone + ' · 画错 ' + wrong + '）· ' +
+        runs.length + ' 笔 · ' + colors.length + ' 色' + (skippedLocked ? ' · 跳过锁定 ' + skippedLocked : '')
+    };
+    syncBpBtns();
+    updateHud();
+  }
+
   // ---------------- HUD ----------------
   var hud = null, hudInfo = null, hudDot = null, hudColorName = null;
   function ensureHud() {
@@ -2492,6 +2928,8 @@
       '<span class="wpAC-btn" id="wpAC-cal">🎯 校准</span>' +
       '<span class="wpAC-btn" id="wpAC-apply" style="display:none;">✅ 应用对齐</span>' +
       '<span class="wpAC-btn" id="wpAC-ccal"></span>' +
+      '<span class="wpAC-btn" id="wpAC-bp">🖌 补画</span>' +
+      '<span class="wpAC-btn" id="wpAC-bpx" style="display:none;">■ 停止</span>' +
       '</div>' +
       '<div id="wpAC-info" style="white-space:pre-line;margin-top:3px;">初始化…</div>' +
       '<div id="wpAC-colorrow" style="display:flex;align-items:center;gap:6px;">' +
@@ -2531,6 +2969,8 @@
     hud.querySelector('#wpAC-ccal').addEventListener('click', function () {
       ST.anchor = null; ST.suspect = false; ST.viewDX = 0; ST.viewDY = 0; clearCalib(); updateHud();
     });
+    hud.querySelector('#wpAC-bp').addEventListener('click', function () { bpPrimary(); });
+    hud.querySelector('#wpAC-bpx').addEventListener('click', function () { bpSecondary(); });
     hud.querySelector('#wpAC-onoff').addEventListener('click', function () {
       S.enabled = !S.enabled; saveSettings(); syncHudOnOff(); updateHud();
     });
@@ -2702,6 +3142,8 @@
     if (ST.calibMsg && Date.now() - ST.calibMsg.t < 120000) {
       lines.push(ST.calibMsg.msg);
     }
+    // 补画状态行（框选/执行进度）
+    if (BP && BP.msg) lines.push(BP.msg);
     if (ST.calib && ST.calib.match >= CALIB_MIN_MATCH && !ST.calib.applied) {
       lines.push('提示：对齐尚未写入——点「✅ 应用对齐」后刷新页面，官方覆盖图即落到已画内容上');
     }

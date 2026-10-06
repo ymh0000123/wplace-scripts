@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
+check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
+check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
+  check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1131,6 +1131,150 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
   const r3 = sim([{ k: 'start', x: 100, y: 100, n: 1 }, { k: 'move', x: 105, y: 102, n: 1 }, { k: 'start', x: 120, y: 110, n: 2 }, { k: 'move', x: 150, y: 140, n: 2 }, { k: 'end' }]);
   check('拖动中落双指 → 撤销跟踪，后续捏合移动不计入 delta',
     r3.viewDX === 5 && r3.viewDY === 2, `dx=${r3.viewDX},dy=${r3.viewDY}`);
+}
+
+console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
+{
+  check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
+  // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
+  // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
+  // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
+  check('注入只有 mousemove 与 Space 键（不碰官方三个 isTrusted 检查点）',
+    SRC.includes("document.body.dispatchEvent(new MouseEvent('mousemove', {") &&
+    SRC.includes("document.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {"));
+  check('注入 mousemove 带 buttons:1（官方右键检查 e.buttons&2 不误入擦除）',
+    SRC.includes('bubbles: true, cancelable: true, view: uw, clientX: x, clientY: y, buttons: 1'));
+  check('Space 键事件带 code/key（官方按 e.code===Space 分流）',
+    SRC.includes("code: 'Space', key: ' ', bubbles: true, cancelable: true"));
+  check('脚本没有在画布上合成 pointerdown（isTrusted 检查点；dispatchTap 的 pointerdown 仅色板 DOM）',
+    SRC.indexOf("dispatchEvent(new PointerEvent('pointerdown'") < 0);
+  check('Space 先落笔后移动再收束（官方连画状态机：down 涂起点 → move 涂线段 → up 收束撤销）',
+    SRC.indexOf('bpInjectMove(p0[0], p0[1]);') < SRC.indexOf('bpInjectSpace(true);') &&
+    SRC.indexOf('bpInjectSpace(true);') < SRC.indexOf('bpInjectSpace(false);'));
+  check('完成提示明确要求手动提交（脚本永不触碰 /paint）',
+    SRC.includes('请检查后手动点击官方 Paint 按钮提交'));
+  check('暂停/等待后引擎循环判空（bpAbort 置 null 不崩）',
+    SRC.includes("if (!BP || BP.phase === 'stop') return;") &&
+    (SRC.match(/if \(!BP\) return;/g) || []).length >= 3);
+  check('悬停换色在补画运行期间停用（引擎合成 mousemove 不触发换色循环）',
+    SRC.includes("if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return; // 补画引擎的合成 mousemove 不做悬停换色"));
+  check('Esc：框选取消 / 运行中停止', SRC.includes("if (e.key === 'Escape' && BP) {"));
+  check('官方状态解析：按钮 charges/上限 + 面板标题草稿数 + 倒计时态 = 颜料 0（实机实证格式）',
+    SRC.includes("if (txt.indexOf('Paint') !== 0) continue;") &&
+    SRC.includes("var pi = body.indexOf('Paint pixel');") &&
+    SRC.includes('{ charges: 0, max: 0 }'));
+  check('草稿计数 3 次不增长 → 暂停等人工（颜料不足/坐标偏移自检）',
+    SRC.includes('BP.missed >= 3'));
+  check('视图交互中暂缓涂色（lastMapMove 800ms 静默门槛，防 scrQuad 移动中涂错位）',
+    SRC.includes('Date.now() - ST.lastMapMove < 800'));
+  check('近似色已涂不重涂（129..191 视为已画，尊重画手相邻色）',
+    SRC.includes('// 129..191（近似色已涂）视为已画：尊重画手的相邻色选择，不重涂'));
+  check('桌面精确指针门槛（移动端 touch 有官方 isTrusted 检测，自动补画仅桌面）',
+    SRC.includes("matchMedia('(pointer: fine)').matches"));
+  check('前置检查：绘画模式 + 校准 + 官方几何齐备才可框选',
+    SRC.includes('if (!paletteRoot()) return') && SRC.includes('if (!ST.calib || ST.calib.match < CALIB_MIN_MATCH) return'));
+  // ---- bpRunsFromPixels 独立复刻对照（分组键 tplId+py+c，段内连续 px，行序蛇形）
+  const bpRunsFromPixels = (pixels) => {
+    const byKey = {};
+    for (const p of pixels) {
+      const k = p.tplId + '/' + p.py + '/' + p.c;
+      (byKey[k] = byKey[k] || []).push(p.px);
+    }
+    const runs = [];
+    for (const k2 in byKey) {
+      const parts = k2.split('/');
+      const xs = byKey[k2].sort((a, b) => a - b);
+      let s = xs[0], prev = xs[0];
+      for (let j = 1; j <= xs.length; j++) {
+        if (j < xs.length && xs[j] === prev + 1) { prev = xs[j]; continue; }
+        runs.push({ tplId: parts[0], c: Number(parts[2]), py: Number(parts[1]), px0: s, px1: prev });
+        if (j < xs.length) { s = prev = xs[j]; }
+      }
+    }
+    const rows = {};
+    for (const r of runs) {
+      const rk = r.tplId + '/' + r.c;
+      (rows[rk] = rows[rk] || {})[r.py] = (rows[rk][r.py] || []).concat([r]);
+    }
+    const out = [];
+    Object.keys(rows).forEach((rk) => {
+      const ys = Object.keys(rows[rk]).map(Number).sort((a, b) => a - b);
+      for (let yi = 0; yi < ys.length; yi++) {
+        const list = rows[rk][ys[yi]];
+        if (yi % 2 === 1) { list.reverse(); for (const q of list) { const t2 = q.px0; q.px0 = q.px1; q.px1 = t2; } }
+        for (const w of list) out.push(w);
+      }
+    });
+    return out;
+  };
+  const rr1 = bpRunsFromPixels([
+    { tplId: 'A', px: 3, py: 5, c: 7 }, { tplId: 'A', px: 4, py: 5, c: 7 }, { tplId: 'A', px: 5, py: 5, c: 7 },
+    { tplId: 'A', px: 2, py: 6, c: 7 }, { tplId: 'A', px: 9, py: 6, c: 7 }
+  ]);
+  check('同行连续像素合并一笔（px 3-5），断裂处拆笔（2 与 9 分两笔）',
+    rr1.length === 3 && rr1.some(r => r.px0 === 3 && r.px1 === 5 && r.py === 5) &&
+    rr1.filter(r => r.py === 6).length === 2, JSON.stringify(rr1));
+  check('不同色/不同行/不同瓦片不合并',
+    bpRunsFromPixels([{ tplId: 'A', px: 1, py: 1, c: 2 }, { tplId: 'A', px: 2, py: 1, c: 3 }, { tplId: 'B', px: 3, py: 1, c: 2 }]).length === 3);
+  const rr3 = bpRunsFromPixels([
+    { tplId: 'A', px: 1, py: 0, c: 4 }, { tplId: 'A', px: 2, py: 0, c: 4 }, { tplId: 'A', px: 3, py: 0, c: 4 },
+    { tplId: 'A', px: 1, py: 1, c: 4 }, { tplId: 'A', px: 2, py: 1, c: 4 }, { tplId: 'A', px: 3, py: 1, c: 4 }
+  ]);
+  const row0 = rr3.filter(r => r.py === 0), row1 = rr3.filter(r => r.py === 1);
+  check('行序蛇形：第 2 行（奇数行）段顺序反转且端点交换（来回路径更像手绘）',
+    row0[0].px0 === 1 && row0[0].px1 === 3 && row1[0].px0 === 3 && row1[0].px1 === 1, JSON.stringify(rr3));
+  // ---- bpStroke 注入序列 replica：复刻官方连画状态机（keydown Space 置 Rt 且涂当前点；
+  // window mousemove 在 Rt 时涂上一点到当前点的线段；keyup 收束），断言草稿像素集合正确
+  const strokeReplica = (p0, p1) => {
+    const draft = new Set();
+    let Rt = false, r = null;
+    const line = (a, b) => {
+      const out = [];
+      const n = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), 1);
+      for (let i = 0; i <= n; i++) {
+        out.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+      }
+      return out;
+    };
+    const play = (ev) => {
+      if (ev.k === 'move') {
+        if (Rt && r) for (const [x, y] of line(r, ev.p)) draft.add(Math.round(x) + '/' + Math.round(y));
+        r = ev.p;
+      } else if (ev.k === 'down') {
+        if (!Rt && r) draft.add(Math.round(r[0]) + '/' + Math.round(r[1]));
+        Rt = true;
+      } else if (ev.k === 'up') {
+        Rt = false;
+      }
+    };
+    play({ k: 'move', p: [p0[0], p0[1]] });
+    play({ k: 'down' });
+    const steps = Math.max(1, Math.ceil(Math.abs(p1[0] - p0[0]) / 4));
+    for (let s = 1; s <= steps; s++) {
+      const f = s / steps;
+      play({ k: 'move', p: [p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f] });
+    }
+    play({ k: 'up' });
+    return draft;
+  };
+  const d1 = strokeReplica([100, 200], [112, 200]); // 12 像素水平线（4 步）
+  let ok1 = true;
+  for (let x = 100; x <= 112; x++) if (!d1.has(x + '/200')) ok1 = false;
+  check('一笔线段：官方连画状态机涂满起点到终点（13 像素连续）', ok1 && d1.size === 13, [...d1].join(','));
+  const d2 = strokeReplica([50, 50], [50, 50]); // 单像素
+  check('单像素笔：起点落下即涂 1 像素', d2.size === 1 && d2.has('50/50'));
+  const d3 = strokeReplica([0, 0], [7, 0]); // 短线分 2 步（步幅>1 时官方线段插值补齐中间像素）
+  let ok3 = true;
+  for (let x = 0; x <= 7; x++) if (!d3.has(x + '/0')) ok3 = false;
+  check('步幅小于线长：分步插值仍覆盖整条线（官方 t() 线段插值语义）', ok3 && d3.size === 8);
+  // ---- 清单判定语义（与校准统计同口径）
+  check('需涂 = 未涂(0) 或 精确画错(1..63 且 ≠ 目标)；近似色已涂(129..191) 跳过',
+    SRC.includes('if (cur === 0) { need.push(p); undone++; }') &&
+    SRC.includes('else if (cur < 64 && cur !== p.c) { need.push(p); wrong++; }'));
+  check('换色验证：aria-pressed 读当前色，3 次重试后仍失败跳过该色',
+    SRC.includes('return bpCurSelIdx() === idx;'));
+  check('色分组大色先画（减少换色次数）',
+    SRC.includes('sort(function (a, b) { return byColor[b].length - byColor[a].length; })'));
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');

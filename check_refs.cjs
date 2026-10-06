@@ -2,21 +2,21 @@
 const fs = require('fs');
 const src = fs.readFileSync('wplace-overlay-autocolor.user.js', 'utf8');
 const pairs = [
-  ['ST.ovGone', 9], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 5],
+  ['ST.ovGone', 9], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 7],
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
-  ['ST.calib', 96], ['ST.mapTiles', 14], ['ST.calibMsg', 25], ['ST.progRev', 5],
+  ['ST.calib', 108], ['ST.mapTiles', 14], ['ST.calibMsg', 27], ['ST.progRev', 5],
   ['runCalibrate', 2], ['fullScan', 6], ['scoreOffset', 2], ['canvasPixelAt', 7],
   ['applyCalibToStorage', 3], ['clearCalib', 5], ['refreshCalibStats', 3],
   ['parseTileUrl', 2], ['decodeTile', 3], ['storeMapTile', 2], ['patchFetch', 2],
-  ['isPainted', 3], ['sameColor', 2], ['texPxMerc', 3],
-  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 52],
+  ['isPainted', 3], ['sameColor', 2], ['texPxMerc', 5],
+  ['wpAC-cal', 3], ['wpAC-apply', 4], ['FREE_COLOR_IDX', 3], ['WORLD_PX', 54],
   // v2.5.5 容差匹配 + 三档守门 + 强制采纳
-  ['palTolHit', 5], ['nearestPaletteCached', 2], ['calibSignificant', 3],
+  ['palTolHit', 5], ['nearestPaletteCached', 3], ['calibSignificant', 3],
   ['acceptCalib', 4], ['ST.calibForce', 5], ['NEAREST_MAP', 5], ['PAL_TOL', 6],
   // v2.5.3 快查网格 + 阶梯搜索 + 假峰守门
-  ['paintIdxMap', 5], ['gridAt', 4], ['fillGridTile', 2], ['ensurePaintGrid', 3],
+  ['paintIdxMap', 5], ['gridAt', 5], ['fillGridTile', 2], ['ensurePaintGrid', 4],
   ['scoreBatch', 5], ['calibSearchPhases', 2], ['refineAndFinish', 2],
   ['calibFinish', 3], ['calibSort', 5], ['finishCalib', 6], ['CALIB_STAGES', 2],
   // v2.5.1 编辑中模板（live 虚拟 bounds）
@@ -34,8 +34,18 @@ const pairs = [
   ['STYLE_MARGIN', 4], ['label.dithering', 4],
   // v2.6.1 移动端触摸拖动（HUD 面板 + 地图视图位移跟踪）
   ['hudDragPos', 3], ['hudDragStart', 3], ['hudDragEnd', 4], ['dragHud', 11],
-  ['touchstart', 3], ['touchmove', 3], ['touchend', 2], ['touchcancel', 1],
-  ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 6], ['ST.viewDY', 6]
+  ['touchstart', 4], ['touchmove', 3], ['touchend', 2], ['touchcancel', 1],
+  ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 6], ['ST.viewDY', 6],
+  // v2.7.0 框选自动补画（拟人化 · 手动提交）
+  ['bpSrcToScreen', 4], ['bpSrcToWorld', 2], ['bpRunsFromPixels', 2],
+  ['bpChargesInfo', 3], ['bpInjectMove', 3], ['bpInjectSpace', 3],
+  ['bpCurSelIdx', 3], ['bpEnsureColor', 2], ['bpStroke', 2], ['bpEngine', 2],
+  ['bpAbort', 8], ['bpPrimary', 2], ['bpSecondary', 3], ['syncBpBtns', 11],
+  ['bpStartBox', 2], ['bpBoxCleanup', 6], ['bpBuildPlan', 2], ['bpPlanReady', 2],
+  ['bpPreflight', 2], ['bpSleep', 8], ['BP_STEP_PX', 2], ['BP_STEP_MS', 2],
+  ['BP_STROKE_MS', 2], ['wpAC-bp', 7], ['wpAC-bpx', 3], ['bpBoxEl', 5],
+  ['BP.phase', 19], ['BP.msg', 10], ['BP.ri', 6], ['BP.painted', 4],
+  ['BP.missed', 4], ['BP.lastDraft', 2], ['ST.lastMapMove', 7]
 ];
 let bad = 0;
 for (const [k, want] of pairs) {
