@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
+check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
+check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
+  check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,7 +1135,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check('版本 2.7.0', SRC.includes('// @version      2.7.0'));
+  check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1163,8 +1163,27 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
     SRC.includes("if (txt.indexOf('Paint') !== 0) continue;") &&
     SRC.includes("var pi = body.indexOf('Paint pixel');") &&
     SRC.includes('{ charges: 0, max: 0 }'));
-  check('草稿计数 3 次不增长 → 暂停等人工（颜料不足/坐标偏移自检）',
-    SRC.includes('BP.missed >= 3'));
+  check('颜料耗尽（倒计时态）→ 原地等待自动恢复，不跳段不暂停（重画当前段无害）',
+    SRC.includes('if (info && info.charges === 0) {') &&
+    SRC.includes('⏳ 颜料耗尽，等待恢复后自动继续…') &&
+    SRC.indexOf('BP.msg = \'⏳ 颜料耗尽') < SRC.indexOf('if (info && info.draft !== null) {'));
+  check('同色 2 笔草稿不涨 → 自动跳过该色（wplace 颜料按色分库存 remainingColorCounts，库存 0 是正常情况非异常）',
+    SRC.includes('BP.missed >= 2') &&
+    SRC.includes('function bpSkipColor(c) {') &&
+    SRC.includes('BP.skippedRuns += ns;') &&
+    SRC.includes('BP.streakSkips++;') &&
+    SRC.includes('⏭ 色 #'));
+  check('bpSkipColor 跳过整色：runs 按色连续分组，while 同色前进 ri（蛇形不改色分组顺序）',
+    SRC.includes('while (BP && BP.ri < BP.runs.length && BP.runs[BP.ri].c === c) { BP.ri++; n++; }'));
+  check('连续 3 色涂不上且无一笔成功 → 暂停人工（真异常：视图偏移/官方交互变了；单色库存问题早已跳过）',
+    SRC.includes('BP.streakSkips >= 3') && SRC.includes('连续 3 个颜色都涂不上'));
+  check('成功一笔清零 missed 与 streakSkips（跳色保护不误累积）',
+    SRC.includes('BP.missed = 0;\n          BP.streakSkips = 0;'));
+  check('完成消息汇总跳过笔数（恢复后重新框选可补）',
+    SRC.includes('笔颜色涂不上已跳过，恢复后重新框选可补') &&
+    SRC.includes('skippedRuns: 0, streakSkips: 0'));
+  check('手动继续（pause→run）同时清零 missed 与 streakSkips',
+    SRC.includes("BP.phase = 'run'; BP.msg = ''; BP.missed = 0; BP.streakSkips = 0;"));
   check('视图交互中暂缓涂色（lastMapMove 800ms 静默门槛，防 scrQuad 移动中涂错位）',
     SRC.includes('Date.now() - ST.lastMapMove < 800'));
   check('近似色已涂不重涂（129..191 视为已画，尊重画手相邻色）',
@@ -1267,6 +1286,37 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
   let ok3 = true;
   for (let x = 0; x <= 7; x++) if (!d3.has(x + '/0')) ok3 = false;
   check('步幅小于线长：分步插值仍覆盖整条线（官方 t() 线段插值语义）', ok3 && d3.size === 8);
+  // ---- 引擎跳色状态机 replica：复刻「同色 2 笔草稿不涨 → 跳过整色 / 连续 3 色无成功 → 暂停 /
+  // 成功一笔清零 missed+streakSkips」（missed 跨 run 累积，未达阈值时 ri 照常前进）
+  const engineReplica = (runs, growthFor) => {
+    let ri = 0, missed = 0, streak = 0, painted = 0, skippedRuns = 0, phase = 'run';
+    const log = [];
+    while (ri < runs.length && phase === 'run') {
+      const c = runs[ri].c;
+      if (growthFor(c)) { painted++; missed = 0; streak = 0; ri++; continue; }
+      missed++;
+      if (missed >= 2) {
+        let n = 0;
+        while (ri < runs.length && runs[ri].c === c) { ri++; n++; }
+        skippedRuns += n; streak++; missed = 0;
+        if (streak >= 3) { phase = 'pause'; log.push('pause'); continue; }
+        log.push('skip:c' + c + ':' + n);
+        continue;
+      }
+      ri++; // 未达 2 次先画下一笔（missed 跨段累积）
+    }
+    return { phase, painted, skippedRuns, log };
+  };
+  const e1 = engineReplica([{ c: 5 }, { c: 5 }, { c: 7 }, { c: 9 }, { c: 9 }], (c) => c === 7);
+  check('跳色复刻：库存 0 的色 2 笔后跳过整色继续画别的，正常色不受影响，不暂停',
+    e1.phase === 'run' && e1.painted === 1 && e1.skippedRuns === 2 &&
+    e1.log.join(',') === 'skip:c5:1,skip:c9:1', JSON.stringify(e1));
+  const e2 = engineReplica([{ c: 1 }, { c: 1 }, { c: 2 }, { c: 2 }, { c: 3 }, { c: 3 }], () => false);
+  check('跳色复刻：连续 3 色全涂不上（真异常）→ 暂停等人工，不会无限空转（第 3 色跳过已计入但不发 skip 消息）',
+    e2.phase === 'pause' && e2.skippedRuns === 3 && e2.log.join(',') === 'skip:c1:1,skip:c2:1,pause', JSON.stringify(e2));
+  const e3 = engineReplica([{ c: 1 }, { c: 2 }, { c: 1 }, { c: 2 }, { c: 1 }], (c) => c === 2);
+  check('跳色复刻：偶发不涨被成功笔清零（跨色稀释不误判成连续异常）',
+    e3.phase === 'run' && e3.painted === 2 && e3.skippedRuns === 0, JSON.stringify(e3));
   // ---- 清单判定语义（与校准统计同口径）
   check('需涂 = 未涂(0) 或 精确画错(1..63 且 ≠ 目标)；近似色已涂(129..191) 跳过',
     SRC.includes('if (cur === 0) { need.push(p); undone++; }') &&

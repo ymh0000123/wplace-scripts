@@ -42,10 +42,12 @@ const pairs = [
   ['bpCurSelIdx', 3], ['bpEnsureColor', 2], ['bpStroke', 2], ['bpEngine', 2],
   ['bpAbort', 8], ['bpPrimary', 2], ['bpSecondary', 3], ['syncBpBtns', 11],
   ['bpStartBox', 2], ['bpBoxCleanup', 6], ['bpBuildPlan', 2], ['bpPlanReady', 2],
-  ['bpPreflight', 2], ['bpSleep', 8], ['BP_STEP_PX', 2], ['BP_STEP_MS', 2],
+  ['bpPreflight', 2], ['BP_STEP_PX', 2], ['BP_STEP_MS', 2],
   ['BP_STROKE_MS', 2], ['wpAC-bp', 7], ['wpAC-bpx', 3], ['bpBoxEl', 5],
-  ['BP.phase', 19], ['BP.msg', 10], ['BP.ri', 6], ['BP.painted', 4],
-  ['BP.missed', 4], ['BP.lastDraft', 2], ['ST.lastMapMove', 7]
+  ['BP.phase', 19], ['BP.msg', 12], ['BP.ri', 9], ['BP.painted', 4],
+  ['BP.missed', 5], ['BP.lastDraft', 2], ['ST.lastMapMove', 7],
+  // v2.7.1 涂不上自动跳色（颜料按色分库存 remainingColorCounts）
+  ['bpSkipColor', 2], ['BP.skippedRuns', 3], ['BP.streakSkips', 4], ['bpSleep', 10]
 ];
 let bad = 0;
 for (const [k, want] of pairs) {
