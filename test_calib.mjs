@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
+check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
+check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
+  check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,7 +1135,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
+  check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1398,6 +1398,13 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
     SRC.includes('else if (cur < 64 && cur !== p.c) { need.push(p); wrong++; }'));
   check('换色验证：aria-pressed 读当前色，3 次重试后仍失败跳过该色',
     SRC.includes('return bpCurSelIdx() === idx;'));
+  check('v2.7.4 悬停换色同步执行（rAF 异步链永远落后于官方 mousemove 落笔——拖动画每像素用上一像素的色，实机校准实证画错呈拖动方向错位一格）',
+    SRC.includes('v2.7.4：悬停换色同步执行') &&
+    SRC.includes('function schedulePick() {') &&
+    !SRC.includes('pickPending') &&
+    !/schedulePick[\s\S]{0,600}?requestAnimationFrame/.test(SRC));
+  check('v2.7.4 换色补验失败重置同色防抖（否则 1 秒内同色不再点，悬停换色持续失效）',
+    SRC.includes("if (el.isConnected && el.getAttribute('aria-pressed') !== 'true') selectColor._lastEl = null;"));
   check('色分组大色先画（减少换色次数）',
     SRC.includes('sort(function (a, b) { return byColor[b].length - byColor[a].length; })'));
 }

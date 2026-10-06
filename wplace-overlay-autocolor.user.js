@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.7.3
+// @version      2.7.4
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料耗尽自动等待恢复后继续，没有库存的颜色自动跳过，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-waiting when charges run out (resumes on its own) and auto-skipping colors that can't be painted (per-color stock depleted); painted pixels only enter the official draft and submission is always a manual click on the official Paint button. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
@@ -148,7 +148,6 @@
     lastMapClick: null,
     pendingLoc: null,
     swatchCache: null, swatchTime: 0, swatchDirty: false,
-    pickPending: false,
     tilesRev: 0,        // 瓦片集合版本号（自绘参照层重绘信号）
     scrRev: 0,          // 官方屏幕几何版本号（uniform 重放更新信号）
     lastScrDraw: 0,     // 最近一次官方覆盖图渲染重放成功时间（0=从未渲染）
@@ -2008,28 +2007,28 @@
   }
 
   function schedulePick() {
-    if (ST.pickPending) return;
+    // v2.7.4：悬停换色同步执行。原 rAF 异步链（mousemove→rAF→取色→换色）永远落后于官方的
+    // mousemove 落笔——按住拖动画时每个像素落笔用的还是上一个像素换好的色（实机校准实证：
+    // 画错的 204 像素全是「拖动方向上错位一格」，如预期 Light Slate Blue 画成 Light Gray）。
+    // 本 listener 在 document 捕获阶段，先于官方 window 冒泡落笔执行；换色的合成 click
+    // 在派发内同步完成（React 离散事件同步 flush），官方落笔读到的已是新色。
     if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return; // 补画引擎的合成 mousemove 不做悬停换色
-    ST.pickPending = true;
-    requestAnimationFrame(function () {
-      ST.pickPending = false;
-      if (!S.enabled || ST.dragging || !ST.mouse) return;
-      var under = document.elementFromPoint(ST.mouse.x, ST.mouse.y);
-      if (!under || !insideMap(under)) { updateHudColor(0); return; }
-      if (!ST.tiles.length) return;
-      if (!scrQuadCount() && !OV.placed && (!ST.anchor || ST.suspect)) return; // 官方几何/手动模式不受校准状态限制
-      var hit = pickColorAt(ST.mouse.x, ST.mouse.y);
-      if (hit) {
-        var idx = nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]);
-        // 校准状态下：已画对的像素不再换色（别人已画好/自己已画过，避免无意义切换）；
-        // 画错的像素正常选目标色（指哪改哪），HUD 显示画布色对比。
-        var skip = hit.status === 1;
-        if (S.hoverMode && !skip) selectColor(idx);
-        updateHudColor(idx, hit.rgb, hit);
-      } else {
-        updateHudColor(0);
-      }
-    });
+    if (!S.enabled || ST.dragging || !ST.mouse) return;
+    var under = document.elementFromPoint(ST.mouse.x, ST.mouse.y);
+    if (!under || !insideMap(under)) { updateHudColor(0); return; }
+    if (!ST.tiles.length) return;
+    if (!scrQuadCount() && !OV.placed && (!ST.anchor || ST.suspect)) return; // 官方几何/手动模式不受校准状态限制
+    var hit = pickColorAt(ST.mouse.x, ST.mouse.y);
+    if (hit) {
+      var idx = nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]);
+      // 校准状态下：已画对的像素不再换色（别人已画好/自己已画过，避免无意义切换）；
+      // 画错的像素正常选目标色（指哪改哪），HUD 显示画布色对比。
+      var skip = hit.status === 1;
+      if (S.hoverMode && !skip) selectColor(idx);
+      updateHudColor(idx, hit.rgb, hit);
+    } else {
+      updateHudColor(0);
+    }
   }
   function scrQuadCount() {
     var n = 0;
@@ -2459,10 +2458,16 @@
     var r = el.getBoundingClientRect();
     try { dispatchTap(el, r); } catch (e) {}
     ST.lastSelect = { ok: true, msg: '→ #' + idx + '（' + how + '）', t: Date.now() };
-    // 点击后校验 aria-pressed；未选中则补发原生 click
+    // 点击后校验 aria-pressed；未选中则补发原生 click，再失败则重置同色防抖
+    // （否则 1 秒内同色不再点，悬停换色持续失效——v2.7.4）
     setTimeout(function () {
       try {
-        if (el.isConnected && el.getAttribute('aria-pressed') !== 'true') el.click();
+        if (el.isConnected && el.getAttribute('aria-pressed') !== 'true') {
+          el.click();
+          setTimeout(function () {
+            try { if (el.isConnected && el.getAttribute('aria-pressed') !== 'true') selectColor._lastEl = null; } catch (e) {}
+          }, 150);
+        }
       } catch (e) {}
     }, 120);
   }
@@ -2488,6 +2493,12 @@
   //    是 button」是误诊——实机实锤标题是 h2）。v2.7.3：草稿增长改用标题 canvas 像素
   //    指纹 hash 检测，每色库存改读色块 aria-label（"名称: N left"，实锤可读）画前预判，
   //    连续多色涂不上先按恢复倒计时等恢复点重试（charges 追平草稿配额的场景可自愈）；
+  //  - 悬停换色竞态（v2.7.4 实机校准实证）：官方连画在 window 冒泡的 mousemove 里逐像素
+  //    落笔（用当前选中色），脚本换色若走 rAF 异步则永远晚于落笔——拖动画时每个像素
+  //    用的还是上一个像素换好的色（校准统计画错 204 像素全部呈「拖动方向错位一格」：
+  //    预期 Light Slate Blue 画成 Light Gray、预期 Light Gray 画成 White）。本脚本
+  //    mousemove listener 挂 document 捕获阶段，先于官方 window 冒泡执行；色板合成 click
+  //    在派发内同步生效（React 离散事件同步 flush）→ 换色改同步后官方落笔读到的已是新色；
   //  - 色板按钮 click 无 isTrusted 检查（selectColor 自 v2.5.0 起长期使用）；
   //  - 移动端 touch 路径有 isTrusted 检查 → 自动补画仅桌面精确指针可用。
 
