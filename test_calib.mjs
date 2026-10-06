@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
+check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
+check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
+  check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,7 +1135,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.1", SRC.includes("// @version      2.7.1"));
+  check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1159,10 +1159,11 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
   check('悬停换色在补画运行期间停用（引擎合成 mousemove 不触发换色循环）',
     SRC.includes("if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return; // 补画引擎的合成 mousemove 不做悬停换色"));
   check('Esc：框选取消 / 运行中停止', SRC.includes("if (e.key === 'Escape' && BP) {"));
-  check('官方状态解析：按钮 charges/上限 + 面板标题草稿数 + 倒计时态 = 颜料 0（实机实证格式）',
+  check('官方状态解析：跳过面板标题按钮 + charges/上限 + 草稿数 + 纯倒计时才算颜料 0（实机实证格式）',
     SRC.includes("if (txt.indexOf('Paint') !== 0) continue;") &&
+    SRC.includes("if (txt.indexOf('Paint pixel') === 0) continue;") &&
     SRC.includes("var pi = body.indexOf('Paint pixel');") &&
-    SRC.includes('{ charges: 0, max: 0 }'));
+    SRC.includes("/^\\(\\d+:\\d+\\)$/.test(rest)"));
   check('颜料耗尽（倒计时态）→ 原地等待自动恢复，不跳段不暂停（重画当前段无害）',
     SRC.includes('if (info && info.charges === 0) {') &&
     SRC.includes('⏳ 颜料耗尽，等待恢复后自动继续…') &&
@@ -1317,6 +1318,42 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
   const e3 = engineReplica([{ c: 1 }, { c: 2 }, { c: 1 }, { c: 2 }, { c: 1 }], (c) => c === 2);
   check('跳色复刻：偶发不涨被成功笔清零（跨色稀释不误判成连续异常）',
     e3.phase === 'run' && e3.painted === 2 && e3.skippedRuns === 0, JSON.stringify(e3));
+  // ---- charges 解析 replica：复刻 bpChargesInfo 的按钮扫描（bpNumAt + 标题排除 + 纯倒计时判 0）
+  const numAt = (s, i0) => {
+    let i = i0, n = 0, got = false;
+    while (i < s.length && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) { n = n * 10 + (s.charCodeAt(i) - 48); got = true; i++; }
+    return got ? [n, i] : null;
+  };
+  const chargesReplica = (texts) => {
+    let out = null;
+    for (const raw of texts) {
+      const txt = raw.trim();
+      if (txt.indexOf('Paint') !== 0) continue;
+      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题（含草稿数括号）
+      const rest = txt.slice(5).trim();
+      const p = numAt(rest, 0);
+      if (p && rest.charAt(p[1]) === '/') {
+        const q = numAt(rest, p[1] + 1);
+        if (q) { out = { charges: p[0], max: q[0] }; break; }
+      }
+      if (/^\(\d+:\d+\)$/.test(rest)) { out = { charges: 0, max: 0 }; break; }
+      out = { charges: -1, max: -1 };
+      break;
+    }
+    return out;
+  };
+  const c1 = chargesReplica(['Paint pixel (54)', 'Paint 131/693 (0:02)']);
+  check('charges 复刻：面板标题「Paint pixel (54)」先于主按钮时不误判颜料 0（v2.7.2 回归：真实截图场景）',
+    c1 && c1.charges === 131 && c1.max === 693, JSON.stringify(c1));
+  const c2 = chargesReplica(['Paint (0:02)']);
+  check('charges 复刻：按钮只剩纯恢复倒计时 → 颜料 0（等待分支触发条件）',
+    c2 && c2.charges === 0, JSON.stringify(c2));
+  const c3 = chargesReplica(['Paint']);
+  check('charges 复刻：纯 Paint 无数量 → -1（有颜料，具体值未知，不进等待分支）',
+    c3 && c3.charges === -1, JSON.stringify(c3));
+  const c4 = chargesReplica(['Paint pixel (54)']);
+  check('charges 复刻：只有标题按钮可见（主按钮不在 DOM）→ 不产出 charges 判定，返回 draft 路径可用',
+    c4 === null, JSON.stringify(c4));
   // ---- 清单判定语义（与校准统计同口径）
   check('需涂 = 未涂(0) 或 精确画错(1..63 且 ≠ 目标)；近似色已涂(129..191) 跳过',
     SRC.includes('if (cur === 0) { need.push(p); undone++; }') &&

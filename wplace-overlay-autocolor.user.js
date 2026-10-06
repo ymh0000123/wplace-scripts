@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.7.1
+// @version      2.7.2
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料耗尽自动等待恢复后继续，没有库存的颜色自动跳过，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-waiting when charges run out (resumes on its own) and auto-skipping colors that can't be painted (per-color stock depleted); painted pixels only enter the official draft and submission is always a manual click on the official Paint button. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
@@ -2480,6 +2480,9 @@
   //  - 颜料按颜色分库存：色板 tooltip = overlay_build_select_color({color, count:
   //    remainingColorCounts[idx]})，库存 0 的色能选中但放置被拒（草稿不涨）——正常情况，
   //    引擎自动跳过该色继续画，不算异常（v2.7.1）；
+  //  - charges 按钮解析：底部面板标题「Paint pixel (N)」也是 button 且文档序先于主按钮，
+  //    文本含括号但无数字——旧判定「含 ( 就算只剩倒计时」把它误判成颜料 0，引擎空转
+  //    （v2.7.2：跳过标题 + 只认纯 "(m:ss)" 倒计时才算 0）；
   //  - 色板按钮 click 无 isTrusted 检查（selectColor 自 v2.5.0 起长期使用）；
   //  - 移动端 touch 路径有 isTrusted 检查 → 自动补画仅桌面精确指针可用。
 
@@ -2562,13 +2565,14 @@
     for (var i = 0; i < btns.length; i++) {
       var txt = (btns[i].textContent || '').trim();
       if (txt.indexOf('Paint') !== 0) continue;
+      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题（含草稿数括号）不是颜料按钮——顺序先于主按钮时会误判颜料 0（v2.7.2）
       var rest = txt.slice(5).trim(); // "115/693 (0:08)" | "(0:08)" | ""
       var p = bpNumAt(rest, 0);
       if (p && rest.charAt(p[1]) === '/') {
         var q = bpNumAt(rest, p[1] + 1);
         if (q) { out = { charges: p[0], max: q[0] }; break; }
       }
-      if (rest.indexOf('(') >= 0) { out = { charges: 0, max: 0 }; break; } // 只剩恢复倒计时 → 颜料 0
+      if (/^\(\d+:\d+\)$/.test(rest)) { out = { charges: 0, max: 0 }; break; } // 只剩恢复倒计时 → 颜料 0
       out = { charges: -1, max: -1 }; // 数量不显示（有颜料，具体值未知）
       break;
     }
