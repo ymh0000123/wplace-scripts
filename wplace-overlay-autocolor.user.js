@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.7.2
+// @version      2.7.3
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料耗尽自动等待恢复后继续，没有库存的颜色自动跳过，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-waiting when charges run out (resumes on its own) and auto-skipping colors that can't be painted (per-color stock depleted); painted pixels only enter the official draft and submission is always a manual click on the official Paint button. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
@@ -2480,13 +2480,18 @@
   //  - 颜料按颜色分库存：色板 tooltip = overlay_build_select_color({color, count:
   //    remainingColorCounts[idx]})，库存 0 的色能选中但放置被拒（草稿不涨）——正常情况，
   //    引擎自动跳过该色继续画，不算异常（v2.7.1）；
-  //  - charges 按钮解析：底部面板标题「Paint pixel (N)」也是 button 且文档序先于主按钮，
-  //    文本含括号但无数字——旧判定「含 ( 就算只剩倒计时」把它误判成颜料 0，引擎空转
-  //    （v2.7.2：跳过标题 + 只认纯 "(m:ss)" 倒计时才算 0）；
+  //  - charges/草稿数在新版官方 UI（版本 1791132058022）里画在 canvas 上：主按钮数字在
+  //    .paint-button-balance canvas（66×14，恒画 "N/max"，0 也画）、草稿数在面板标题
+  //    h2[aria-label=Paint pixel] 的 canvas（40×12）——textContent 只剩 "Paint" +
+  //    "(m:ss)"，且该倒计时条件是 charges<max（满了不显示）≠ 颜料 0：旧「只剩倒计时
+  //    =颜料 0」判定全错（v2.7.1 的「颜料耗尽」空转即此；v2.7.2 归因「Paint pixel 标题
+  //    是 button」是误诊——实机实锤标题是 h2）。v2.7.3：草稿增长改用标题 canvas 像素
+  //    指纹 hash 检测，每色库存改读色块 aria-label（"名称: N left"，实锤可读）画前预判，
+  //    连续多色涂不上先按恢复倒计时等恢复点重试（charges 追平草稿配额的场景可自愈）；
   //  - 色板按钮 click 无 isTrusted 检查（selectColor 自 v2.5.0 起长期使用）；
   //  - 移动端 touch 路径有 isTrusted 检查 → 自动补画仅桌面精确指针可用。
 
-  var BP = null; // {phase, runs, ri, painted, missed, lastDraft, msg, box, plan}
+  var BP = null; // {phase, runs, ri, painted, missed, lastDraftFp, waitRounds, msg, box, plan}
   var BP_STEP_PX = 4;         // 每次合成 mousemove 最多推进的世界像素（拟人步幅）
   var BP_STEP_MS = 55;        // 步进基础间隔（实际 ±40ms 随机）
   var BP_STROKE_MS = 260;     // 两笔之间基础间隔（±380ms 随机，偶发长停顿）
@@ -2552,41 +2557,45 @@
     });
     return out;
   }
-  // 解析官方状态（实机实证）：底部按钮「Paint 115/693 (0:08)」= charges/上限（恢复倒计时）；
-  // 面板标题「Paint pixel (N)」N = 草稿像素数；按钮纯「Paint」= 有颜料无草稿；倒计时态 = 颜料 0
-  function bpNumAt(s, i) { // 从 s[i] 起读十进制数，返回 [值, 下一位置] 或 null
-    var n = 0, got = false;
-    while (i < s.length && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) { n = n * 10 + (s.charCodeAt(i) - 48); got = true; i++; }
-    return got ? [n, i] : null;
-  }
+  // 解析官方状态（v2.7.3 实机 + chunk 双实锤）：新版官方 UI 把 charges 数字画在主按钮的
+  // .paint-button-balance canvas（恒画 "N/max"，0 也画），草稿数画面板标题 h2 的 canvas——
+  // textContent 只剩「Paint」+「(m:ss)」，且该倒计时条件是 charges<max（满了不显示）≠ 颜料 0。
+  // charges 数值从 DOM 读不到 → 草稿增长改用标题 canvas 像素指纹（内容变 = 草稿变），
+  // 恢复倒计时秒数用于「涂不上时等恢复点重试」。按钮纯「Paint」（无倒计时）= charges 满
   function bpChargesInfo() {
     var btns = document.querySelectorAll('button');
     var out = null;
     for (var i = 0; i < btns.length; i++) {
       var txt = (btns[i].textContent || '').trim();
       if (txt.indexOf('Paint') !== 0) continue;
-      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题（含草稿数括号）不是颜料按钮——顺序先于主按钮时会误判颜料 0（v2.7.2）
-      var rest = txt.slice(5).trim(); // "115/693 (0:08)" | "(0:08)" | ""
-      var p = bpNumAt(rest, 0);
-      if (p && rest.charAt(p[1]) === '/') {
-        var q = bpNumAt(rest, p[1] + 1);
-        if (q) { out = { charges: p[0], max: q[0] }; break; }
-      }
-      if (/^\(\d+:\d+\)$/.test(rest)) { out = { charges: 0, max: 0 }; break; } // 只剩恢复倒计时 → 颜料 0
-      out = { charges: -1, max: -1 }; // 数量不显示（有颜料，具体值未知）
+      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题不是颜料按钮（防御；实锤它是 h2 非 button）
+      var m = /^\((\d+):(\d+)\)$/.exec(txt.slice(5).trim()); // "(m:ss)" = charges<max 正在恢复
+      out = { cooldownSec: m ? Number(m[1]) * 60 + Number(m[2]) : null };
       break;
     }
     if (!out) return null;
-    // 草稿数在面板标题「Paint pixel (N)」：textContent 读（innerText 会因布局插入换行导致匹配失败）
-    var body = document.body.textContent || '';
-    var pi = body.indexOf('Paint pixel');
-    out.draft = 0;
-    if (pi >= 0) {
-      var lp = body.indexOf('(', pi);
-      var d = lp >= 0 && lp - pi < 16 ? bpNumAt(body, lp + 1) : null; // 括号须紧跟标题（避免误匹配远处文本）
-      out.draft = d ? d[0] : 0;
-    }
+    // 草稿数 canvas：绘画面板标题 h2[aria-label="Paint pixel"] 内（40×12），草稿变→重绘→像素指纹变
+    out.draftFp = null;
+    try {
+      var cv = document.querySelector('h2[aria-label="Paint pixel"] canvas') ||
+               document.querySelector('.paint-summary canvas');
+      if (cv && cv.width > 0 && cv.height > 0) {
+        var d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        var h = 0;
+        for (var k = 0; k < d.length; k += 4) h = (h * 31 + d[k] + d[k + 3]) | 0; // r+alpha 通道足够（文本字形）
+        out.draftFp = h;
+      }
+    } catch (e) { out.draftFp = null; }
     return out;
+  }
+  // 每色库存：色块 aria-label =「颜色名: N left」（官方把 remainingColorCounts 写进可访问名，实锤）
+  // 返回 null = 读不到（不预判）
+  function bpColorStock(idx) {
+    try {
+      var el = document.getElementById('color-' + idx);
+      var m = el && /: ([\d,]+) left$/.exec(el.getAttribute('aria-label') || '');
+      return m ? Number(m[1].replace(/,/g, '')) : null;
+    } catch (e) { return null; }
   }
   function bpInjectMove(x, y) {
     document.body.dispatchEvent(new MouseEvent('mousemove', {
@@ -2661,6 +2670,17 @@
         if (!BP) return;
         continue;
       }
+      var stock = bpColorStock(run.c);
+      if (stock === 0) {
+        // 色块 aria-label 报库存 0：官方放置必拒（remainingColorCounts），画前直接跳过该色
+        var ns0 = bpSkipColor(run.c);
+        BP.skippedRuns += ns0;
+        BP.msg = '⏭ 色 #' + run.c + ' 库存 0（色板可访问名），跳过 ' + ns0 + ' 笔继续下一色';
+        updateHud();
+        await bpSleep(150);
+        if (!BP) return;
+        continue;
+      }
       if (!(await bpEnsureColor(run.c))) {
         BP.msg = '⚠ 无法选中色 #' + run.c + '（未解锁？）——该色线段已跳过';
         BP.skipped++;
@@ -2672,44 +2692,43 @@
       if (!BP) return;
       if (!ok) { BP.ri++; continue; }
       var info = bpChargesInfo();
-      if (info && info.charges === 0) {
-        // 全局颜料耗尽（按钮只剩恢复倒计时）：原地等恢复后自动继续，不动 ri——
-        // 重画当前段无害（同像素官方草稿覆盖），此时跳段没有意义（哪个色都涂不上）
-        BP.msg = '⏳ 颜料耗尽，等待恢复后自动继续…';
-        updateHud();
-        await bpSleep(2200 + Math.random() * 900);
-        if (!BP) return;
-        continue;
-      }
-      if (info && info.draft !== null) {
-        if (info.draft > BP.lastDraft) {
-          BP.lastDraft = info.draft;
-          BP.painted += (run.px1 - run.px0 + 1);
+      if (info && info.draftFp !== null && info.draftFp !== BP.lastDraftFp) {
+        BP.lastDraftFp = info.draftFp;
+        BP.painted += (run.px1 - run.px0 + 1);
+        BP.missed = 0;
+        BP.streakSkips = 0;
+        BP.waitRounds = 0;
+      } else {
+        BP.missed++;
+        if (BP.missed >= 2) {
+          // 草稿指纹两笔不变：库存 0 已画前预判跳过，剩下原因是画图点数（charges）不足或异常
+          var ns = bpSkipColor(run.c);
+          BP.skippedRuns += ns;
+          BP.streakSkips++;
           BP.missed = 0;
-          BP.streakSkips = 0;
-        } else {
-          BP.missed++;
-          if (BP.missed >= 2) {
-            // wplace 颜料按颜色分库存（色板 tooltip 的 remainingColorCounts）：库存 0 的色
-            // 能选中但放置被拒、草稿不涨——这是正常情况，跳过该色继续画别的，不算异常
-            var ns = bpSkipColor(run.c);
-            BP.skippedRuns += ns;
-            BP.streakSkips++;
-            BP.missed = 0;
-            if (BP.streakSkips >= 3) {
-              // 连续 3 色全涂不上且无一笔成功：不是单色库存问题（视图偏移/官方交互变了）
-              BP.phase = 'pause';
-              BP.msg = '⏸ 连续 3 个颜色都涂不上（视图偏移或官方交互变了）——检查后点「▶ 继续」';
-              syncBpBtns();
+          if (BP.streakSkips >= 3) {
+            // 连续 3 色涂不上且无一笔成功：要么 charges 耗尽/被草稿配额追平（可恢复），
+            // 要么真异常（视图偏移/官方交互变了）。按钮有恢复倒计时（=charges<max）时先等
+            // 恢复点重试——charges 每周期恢复 1 点即可画上；等满 3 个恢复点仍无一笔才暂停
+            if (info && info.cooldownSec !== null && BP.waitRounds < 3) {
+              BP.waitRounds++;
+              BP.msg = '⏳ 已连续 ' + BP.streakSkips + ' 色涂不上（画图点数可能用完，色块库存仍够）——等恢复点后重试（第 ' + BP.waitRounds + '/3 轮）';
               updateHud();
+              await bpSleep((info.cooldownSec + 2) * 1000);
+              if (!BP) return;
               continue;
             }
-            BP.msg = '⏭ 色 #' + run.c + ' 涂不上（库存不足？），已跳过 ' + ns + ' 笔，继续下一色';
+            BP.phase = 'pause';
+            BP.msg = '⏸ 连续多色涂不上，等了 3 个恢复点仍无一笔进草稿（视图偏移或官方交互变了）——检查后点「▶ 继续」';
+            syncBpBtns();
             updateHud();
-            await bpSleep(300);
-            if (!BP) return;
             continue;
           }
+          BP.msg = '⏭ 色 #' + run.c + ' 涂不上（库存不足？），已跳过 ' + ns + ' 笔，继续下一色';
+          updateHud();
+          await bpSleep(300);
+          if (!BP) return;
+          continue;
         }
       }
       BP.ri++;
@@ -2752,7 +2771,7 @@
         syncBpBtns(); updateHud();
         break;
       case 'pause': case 'wait':
-        BP.phase = 'run'; BP.msg = ''; BP.missed = 0; BP.streakSkips = 0;
+        BP.phase = 'run'; BP.msg = ''; BP.missed = 0; BP.streakSkips = 0; BP.waitRounds = 0;
         syncBpBtns(); updateHud();
         break;
       case 'done':
@@ -2929,8 +2948,8 @@
     for (var m = 0; m < runs.length; m++) totalPx += runs[m].px1 - runs[m].px0 + 1;
     BP = {
       phase: 'confirm', runs: runs, ri: 0, painted: 0, skipped: skippedLocked,
-      missed: 0, skippedRuns: 0, streakSkips: 0,
-      lastDraft: (bpChargesInfo() || {}).draft || 0,
+      missed: 0, skippedRuns: 0, streakSkips: 0, waitRounds: 0,
+      lastDraftFp: (bpChargesInfo() || { draftFp: 0 }).draftFp,
       msg: '框选完成：需补画 ' + need.length + ' 像素（未涂 ' + undone + ' · 画错 ' + wrong + '）· ' +
         runs.length + ' 笔 · ' + colors.length + ' 色' + (skippedLocked ? ' · 跳过锁定 ' + skippedLocked : '')
     };

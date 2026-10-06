@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
+check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
+check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
+  check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,7 +1135,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.2", SRC.includes("// @version      2.7.2"));
+  check("版本 2.7.3", SRC.includes("// @version      2.7.3"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1159,15 +1159,18 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
   check('悬停换色在补画运行期间停用（引擎合成 mousemove 不触发换色循环）',
     SRC.includes("if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return; // 补画引擎的合成 mousemove 不做悬停换色"));
   check('Esc：框选取消 / 运行中停止', SRC.includes("if (e.key === 'Escape' && BP) {"));
-  check('官方状态解析：跳过面板标题按钮 + charges/上限 + 草稿数 + 纯倒计时才算颜料 0（实机实证格式）',
-    SRC.includes("if (txt.indexOf('Paint') !== 0) continue;") &&
-    SRC.includes("if (txt.indexOf('Paint pixel') === 0) continue;") &&
-    SRC.includes("var pi = body.indexOf('Paint pixel');") &&
-    SRC.includes("/^\\(\\d+:\\d+\\)$/.test(rest)"));
-  check('颜料耗尽（倒计时态）→ 原地等待自动恢复，不跳段不暂停（重画当前段无害）',
-    SRC.includes('if (info && info.charges === 0) {') &&
-    SRC.includes('⏳ 颜料耗尽，等待恢复后自动继续…') &&
-    SRC.indexOf('BP.msg = \'⏳ 颜料耗尽') < SRC.indexOf('if (info && info.draft !== null) {'));
+  check('官方状态解析（v2.7.3 实机+chunk 双实锤）：charges 数字/草稿数官方画在 canvas（按钮恒画 N/max、标题 40×12），textContent 只剩 Paint+(m:ss)——草稿增长用标题 canvas 像素指纹，倒计时秒数供恢复等待',
+    SRC.includes('h2[aria-label="Paint pixel"] canvas') &&
+    SRC.includes("getContext('2d').getImageData") &&
+    SRC.includes('cooldownSec: m ? Number(m[1]) * 60 + Number(m[2]) : null'));
+  check('库存 0 画前预判：色块 aria-label（颜色名: N left）读每色库存，0 直接跳过该色不注入（官方放置必拒）',
+    SRC.includes('function bpColorStock(idx) {') &&
+    SRC.includes("/: ([\\d,]+) left$/") &&
+    SRC.includes('库存 0（色板可访问名）'));
+  check('连续涂不上且有恢复倒计时（charges<max）→ 等恢复点重试最多 3 轮（charges 追平草稿配额可自愈），不是立即暂停',
+    SRC.includes('info.cooldownSec !== null && BP.waitRounds < 3') &&
+    SRC.includes('BP.waitRounds++;') &&
+    SRC.includes('等恢复点后重试（第 '));
   check('同色 2 笔草稿不涨 → 自动跳过该色（wplace 颜料按色分库存 remainingColorCounts，库存 0 是正常情况非异常）',
     SRC.includes('BP.missed >= 2') &&
     SRC.includes('function bpSkipColor(c) {') &&
@@ -1176,15 +1179,15 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
     SRC.includes('⏭ 色 #'));
   check('bpSkipColor 跳过整色：runs 按色连续分组，while 同色前进 ri（蛇形不改色分组顺序）',
     SRC.includes('while (BP && BP.ri < BP.runs.length && BP.runs[BP.ri].c === c) { BP.ri++; n++; }'));
-  check('连续 3 色涂不上且无一笔成功 → 暂停人工（真异常：视图偏移/官方交互变了；单色库存问题早已跳过）',
-    SRC.includes('BP.streakSkips >= 3') && SRC.includes('连续 3 个颜色都涂不上'));
-  check('成功一笔清零 missed 与 streakSkips（跳色保护不误累积）',
-    SRC.includes('BP.missed = 0;\n          BP.streakSkips = 0;'));
+  check('连续涂不上且等满 3 个恢复点仍无一笔 → 暂停人工（真异常：视图偏移/官方交互变了；库存 0 已画前预判）',
+    SRC.includes('BP.streakSkips >= 3') && SRC.includes('等了 3 个恢复点仍无一笔进草稿'));
+  check('成功一笔清零 missed/streakSkips/waitRounds（等待重试不误累积）',
+    SRC.includes('BP.missed = 0;\n        BP.streakSkips = 0;\n        BP.waitRounds = 0;'));
   check('完成消息汇总跳过笔数（恢复后重新框选可补）',
     SRC.includes('笔颜色涂不上已跳过，恢复后重新框选可补') &&
     SRC.includes('skippedRuns: 0, streakSkips: 0'));
-  check('手动继续（pause→run）同时清零 missed 与 streakSkips',
-    SRC.includes("BP.phase = 'run'; BP.msg = ''; BP.missed = 0; BP.streakSkips = 0;"));
+  check('手动继续（pause→run）同时清零 missed/streakSkips/waitRounds',
+    SRC.includes("BP.phase = 'run'; BP.msg = ''; BP.missed = 0; BP.streakSkips = 0; BP.waitRounds = 0;"));
   check('视图交互中暂缓涂色（lastMapMove 800ms 静默门槛，防 scrQuad 移动中涂错位）',
     SRC.includes('Date.now() - ST.lastMapMove < 800'));
   check('近似色已涂不重涂（129..191 视为已画，尊重画手相邻色）',
@@ -1287,73 +1290,108 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
   let ok3 = true;
   for (let x = 0; x <= 7; x++) if (!d3.has(x + '/0')) ok3 = false;
   check('步幅小于线长：分步插值仍覆盖整条线（官方 t() 线段插值语义）', ok3 && d3.size === 8);
-  // ---- 引擎跳色状态机 replica：复刻「同色 2 笔草稿不涨 → 跳过整色 / 连续 3 色无成功 → 暂停 /
-  // 成功一笔清零 missed+streakSkips」（missed 跨 run 累积，未达阈值时 ri 照常前进）
-  const engineReplica = (runs, growthFor) => {
-    let ri = 0, missed = 0, streak = 0, painted = 0, skippedRuns = 0, phase = 'run';
+  // ---- 引擎状态机 replica（v2.7.3 语义）：库存 0 画前预判跳过 → 同色 2 笔草稿指纹不涨跳整色 →
+  // 连续 3 色无成功且有恢复倒计时 → 等恢复点重试（waitRounds<3），等满 3 轮或无倒计时 → 暂停；
+  // 成功一笔清零 missed/streak/waitRounds（growthFor 第二参 = 已等待轮次，模拟 charges 恢复后可画）
+  const engineReplica = (runs, growthFor, stockFor, cooldownSec) => {
+    let ri = 0, missed = 0, streak = 0, painted = 0, skippedRuns = 0, waitRounds = 0, phase = 'run';
     const log = [];
     while (ri < runs.length && phase === 'run') {
       const c = runs[ri].c;
-      if (growthFor(c)) { painted++; missed = 0; streak = 0; ri++; continue; }
+      if (stockFor(c) === 0) {
+        let n0 = 0;
+        while (ri < runs.length && runs[ri].c === c) { ri++; n0++; }
+        skippedRuns += n0; log.push('stock:c' + c + ':' + n0);
+        continue;
+      }
+      if (growthFor(c, waitRounds)) { painted++; missed = 0; streak = 0; waitRounds = 0; ri++; continue; }
       missed++;
       if (missed >= 2) {
         let n = 0;
         while (ri < runs.length && runs[ri].c === c) { ri++; n++; }
         skippedRuns += n; streak++; missed = 0;
-        if (streak >= 3) { phase = 'pause'; log.push('pause'); continue; }
+        if (streak >= 3) {
+          if (cooldownSec !== null && waitRounds < 3) { waitRounds++; log.push('wait:' + waitRounds); continue; }
+          phase = 'pause'; log.push('pause'); continue;
+        }
         log.push('skip:c' + c + ':' + n);
         continue;
       }
       ri++; // 未达 2 次先画下一笔（missed 跨段累积）
     }
-    return { phase, painted, skippedRuns, log };
+    return { phase, painted, skippedRuns, waitRounds, log };
   };
-  const e1 = engineReplica([{ c: 5 }, { c: 5 }, { c: 7 }, { c: 9 }, { c: 9 }], (c) => c === 7);
-  check('跳色复刻：库存 0 的色 2 笔后跳过整色继续画别的，正常色不受影响，不暂停',
+  const e1 = engineReplica([{ c: 5 }, { c: 5 }, { c: 7 }, { c: 9 }, { c: 9 }], (c) => c === 7, () => 100, 20);
+  check('跳色复刻：库存有但涂不上的色 2 笔后跳过整色继续画别的，正常色不受影响，不暂停',
     e1.phase === 'run' && e1.painted === 1 && e1.skippedRuns === 2 &&
     e1.log.join(',') === 'skip:c5:1,skip:c9:1', JSON.stringify(e1));
-  const e2 = engineReplica([{ c: 1 }, { c: 1 }, { c: 2 }, { c: 2 }, { c: 3 }, { c: 3 }], () => false);
-  check('跳色复刻：连续 3 色全涂不上（真异常）→ 暂停等人工，不会无限空转（第 3 色跳过已计入但不发 skip 消息）',
-    e2.phase === 'pause' && e2.skippedRuns === 3 && e2.log.join(',') === 'skip:c1:1,skip:c2:1,pause', JSON.stringify(e2));
-  const e3 = engineReplica([{ c: 1 }, { c: 2 }, { c: 1 }, { c: 2 }, { c: 1 }], (c) => c === 2);
+  const e2 = engineReplica([{ c: 1 }, { c: 1 }, { c: 2 }, { c: 2 }, { c: 3 }, { c: 3 }, { c: 4 }, { c: 4 }],
+    (c, w) => w >= 1, () => 100, 20);
+  check('恢复点复刻：连续 3 色涂不上（charges 用尽）→ 等恢复点重试后画上（自愈；成功笔清零 waitRounds，不暂停不放弃剩余段）',
+    e2.phase === 'run' && e2.painted === 1 && e2.skippedRuns === 3 && e2.waitRounds === 0 &&
+    e2.log.join(',') === 'skip:c1:1,skip:c2:1,wait:1', JSON.stringify(e2));
+  const e3 = engineReplica(
+    [{ c: 1 }, { c: 1 }, { c: 2 }, { c: 2 }, { c: 3 }, { c: 3 }, { c: 4 }, { c: 4 }, { c: 5 }, { c: 5 }, { c: 6 }, { c: 6 }],
+    () => false, () => 100, 20);
+  check('恢复点复刻：等满 3 个恢复点仍无一笔（真异常）→ 暂停人工，不会无限空转（streak≥3 后跳色不发消息，直接进等待/暂停）',
+    e3.phase === 'pause' && e3.waitRounds === 3 && e3.skippedRuns === 6 &&
+    e3.log.join(',') === 'skip:c1:1,skip:c2:1,wait:1,wait:2,wait:3,pause', JSON.stringify(e3));
+  const e4 = engineReplica([{ c: 1 }, { c: 1 }, { c: 2 }, { c: 2 }, { c: 3 }, { c: 3 }], () => false, () => 100, null);
+  check('恢复点复刻：按钮无恢复倒计时（charges 满/infinite）时连续 3 色涂不上 → 直接暂停（等恢复无意义）',
+    e4.phase === 'pause' && e4.waitRounds === 0 && e4.log.join(',') === 'skip:c1:1,skip:c2:1,pause', JSON.stringify(e4));
+  const e5 = engineReplica([{ c: 5 }, { c: 5 }, { c: 7 }, { c: 9 }], (c) => c === 7, (c) => (c === 5 ? 0 : 100), 20);
+  check('库存预判复刻：aria-label 报库存 0 的色画前直接跳过（不注入不试画），有库存的色照常画',
+    e5.phase === 'run' && e5.painted === 1 && e5.skippedRuns === 2 &&
+    e5.log.join(',') === 'stock:c5:2', JSON.stringify(e5));
+  const e6 = engineReplica([{ c: 1 }, { c: 2 }, { c: 1 }, { c: 2 }, { c: 1 }], (c) => c === 2, () => 100, null);
   check('跳色复刻：偶发不涨被成功笔清零（跨色稀释不误判成连续异常）',
-    e3.phase === 'run' && e3.painted === 2 && e3.skippedRuns === 0, JSON.stringify(e3));
-  // ---- charges 解析 replica：复刻 bpChargesInfo 的按钮扫描（bpNumAt + 标题排除 + 纯倒计时判 0）
-  const numAt = (s, i0) => {
-    let i = i0, n = 0, got = false;
-    while (i < s.length && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) { n = n * 10 + (s.charCodeAt(i) - 48); got = true; i++; }
-    return got ? [n, i] : null;
-  };
-  const chargesReplica = (texts) => {
+    e6.phase === 'run' && e6.painted === 2 && e6.skippedRuns === 0, JSON.stringify(e6));
+  // ---- 状态解析 replica：复刻 bpChargesInfo（cooldown 正则 + 草稿 canvas 指纹）与 bpColorStock
+  const cooldownReplica = (texts) => {
     let out = null;
     for (const raw of texts) {
       const txt = raw.trim();
       if (txt.indexOf('Paint') !== 0) continue;
-      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题（含草稿数括号）
-      const rest = txt.slice(5).trim();
-      const p = numAt(rest, 0);
-      if (p && rest.charAt(p[1]) === '/') {
-        const q = numAt(rest, p[1] + 1);
-        if (q) { out = { charges: p[0], max: q[0] }; break; }
-      }
-      if (/^\(\d+:\d+\)$/.test(rest)) { out = { charges: 0, max: 0 }; break; }
-      out = { charges: -1, max: -1 };
+      if (txt.indexOf('Paint pixel') === 0) continue; // 面板标题不是颜料按钮（实锤 h2，防御保留）
+      const m = /^\((\d+):(\d+)\)$/.exec(txt.slice(5).trim());
+      out = { cooldownSec: m ? Number(m[1]) * 60 + Number(m[2]) : null };
       break;
     }
     return out;
   };
-  const c1 = chargesReplica(['Paint pixel (54)', 'Paint 131/693 (0:02)']);
-  check('charges 复刻：面板标题「Paint pixel (54)」先于主按钮时不误判颜料 0（v2.7.2 回归：真实截图场景）',
-    c1 && c1.charges === 131 && c1.max === 693, JSON.stringify(c1));
-  const c2 = chargesReplica(['Paint (0:02)']);
-  check('charges 复刻：按钮只剩纯恢复倒计时 → 颜料 0（等待分支触发条件）',
-    c2 && c2.charges === 0, JSON.stringify(c2));
-  const c3 = chargesReplica(['Paint']);
-  check('charges 复刻：纯 Paint 无数量 → -1（有颜料，具体值未知，不进等待分支）',
-    c3 && c3.charges === -1, JSON.stringify(c3));
-  const c4 = chargesReplica(['Paint pixel (54)']);
-  check('charges 复刻：只有标题按钮可见（主按钮不在 DOM）→ 不产出 charges 判定，返回 draft 路径可用',
-    c4 === null, JSON.stringify(c4));
+  const c1 = cooldownReplica(['Paint (0:18)']);
+  check('cooldown 复刻：新版按钮 textContent 恒为「Paint (m:ss)」（数字在 canvas）→ 解析出恢复秒数而非颜料 0（v2.7.2 误判 0 的格式）',
+    c1 && c1.cooldownSec === 18, JSON.stringify(c1));
+  const c2 = cooldownReplica(['Paint']);
+  check('cooldown 复刻：纯 Paint 无倒计时 → null（charges 满或 infinite，涂不上时直接走暂停路径）',
+    c2 && c2.cooldownSec === null, JSON.stringify(c2));
+  const c3 = cooldownReplica(['Paint pixel (54)', 'Paint (1:05)']);
+  check('cooldown 复刻：面板标题在前不干扰（h2 非 button + 前缀排除双保险），分钟换算成秒',
+    c3 && c3.cooldownSec === 65, JSON.stringify(c3));
+  const fingerprintReplica = (px) => {
+    let h = 0;
+    for (let k = 0; k < px.length; k += 4) h = (h * 31 + px[k] + px[k + 3]) | 0;
+    return h;
+  };
+  const mkPx = (n) => { const a = new Uint8Array(40 * 12 * 4); for (let i = 0; i < n; i++) { a[i * 4] = 255; a[i * 4 + 3] = 255; } return a; };
+  const f1 = fingerprintReplica(new Uint8Array(40 * 12 * 4));
+  check('草稿指纹复刻：空 canvas（草稿 0）指纹为 0，可作初始基准',
+    f1 === 0, f1);
+  const f2 = fingerprintReplica(mkPx(10));
+  check('草稿指纹复刻：非空内容指纹非 0 且确定性（同内容同指纹）',
+    f2 !== 0 && f2 === fingerprintReplica(mkPx(10)), f2);
+  const f3 = fingerprintReplica(mkPx(12));
+  check('草稿指纹复刻：草稿数变化（canvas 重绘）→ 指纹变化（引擎据此判涨，不依赖 DOM 文本）',
+    f2 !== f3, f2 + ' vs ' + f3);
+  const stockReplica = (label) => {
+    const m = label && /: ([\d,]+) left$/.exec(label);
+    return m ? Number(m[1].replace(/,/g, '')) : null;
+  };
+  const s1 = stockReplica('White: 2,720 left');
+  const s2 = stockReplica('Black: 0 left');
+  const s3 = stockReplica(undefined);
+  check('库存复刻：aria-label「颜色名: N left」解析（千分位逗号/库存 0/读不到返回 null 不预判）',
+    s1 === 2720 && s2 === 0 && s3 === null, s1 + ',' + s2 + ',' + s3);
   // ---- 清单判定语义（与校准统计同口径）
   check('需涂 = 未涂(0) 或 精确画错(1..63 且 ≠ 目标)；近似色已涂(129..191) 跳过',
     SRC.includes('if (cur === 0) { need.push(p); undone++; }') &&
