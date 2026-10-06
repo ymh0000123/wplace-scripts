@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check('版本 2.6.0', SRC.includes('// @version      2.6.0'));
+check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check('版本 2.6.0', SRC.includes('// @version      2.6.0'));
+check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1083,6 +1083,54 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
   check('候选 0.53 vs 基线 0.50（差 0.03<0.04）→ 还原不动', pick(0.50, [0.53]).isBase === true);
   check('候选 0.55 vs 基线 0.50（差 0.05≥0.04）→ 切换', pick(0.50, [0.55]).isBase === false);
   check('多候选取最高分', pick(0.0, [0.4, 0.7, 0.6]).rate === 0.7);
+}
+
+console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
+{
+  check('版本 2.6.1', SRC.includes('// @version      2.6.1'));
+  check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
+  check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
+  check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
+  check('HUD 松手保存位置抽 hudDragEnd（mouseup/touchend/touchcancel 共用）', SRC.includes('function hudDragEnd() {'));
+  check('按钮/折叠区排除仍在 hudDragStart 内（触摸与鼠标同规则）',
+    SRC.includes("if (target && target.closest && target.closest('#wpAC-onoff,#wpAC-fold,#wpAC-btns')) return;"));
+  check('mouseup 挂 hudDragEnd', SRC.includes("document.addEventListener('mouseup', hudDragEnd);"));
+  check('HUD touchstart 单指记录拖动起点（passive，不吞 click）',
+    SRC.includes("hud.addEventListener('touchstart', function (e) {\n      if (!e.touches || e.touches.length !== 1) return;"));
+  check('HUD touchmove 拖动面板 + preventDefault 阻止页面滚动（capture + passive:false）',
+    SRC.includes("document.addEventListener('touchmove', function (e) {\n      if (!dragHud || !e.touches || e.touches.length !== 1) return;\n      e.preventDefault();"));
+  check('HUD touchend/touchcancel 收尾（手指中断也保存位置）',
+    SRC.includes("document.addEventListener('touchend', hudDragEnd, { capture: true, passive: true });") &&
+    SRC.includes("document.addEventListener('touchcancel', hudDragEnd, { capture: true, passive: true });"));
+  check('地图 touchstart 单指设置 dragging/press（tap 合成 click 走换色/定位链路）',
+    SRC.includes("ST.dragging = true; ST.dragLast = { x: t.clientX, y: t.clientY };\n    ST.press = { x: t.clientX, y: t.clientY };"));
+  check('地图双指落下撤销跟踪（官方捏合缩放不污染 viewDX）',
+    SRC.includes('e.touches.length > 1) { ST.dragging = false; ST.dragLast = null; return; }'));
+  check('地图 touchmove 累计 viewDX（与鼠标版同口径）',
+    SRC.includes('ST.viewDX += t.clientX - ST.dragLast.x;') && SRC.includes('ST.viewDX += e.clientX - ST.dragLast.x;'));
+  check('地图 touchmove passive:true 不拦截（官方地图要跟手），双指 markSuspect 已并入',
+    SRC.includes('if (e.touches.length >= 2) markSuspect(); // 双指捏合缩放：视图即将重绘') &&
+    SRC.indexOf('e.touches.length >= 2 && insideMap') < 0);
+  check('地图 touchend 清 dragging', SRC.includes("document.addEventListener('touchend', function () {\n    if (ST.dragging) { ST.dragging = false; ST.dragLast = null; }"));
+  // 触摸拖动 delta 累计 replica（与源码同口径的独立复算）
+  const sim = (steps) => {
+    let dragging = false, dragLast = null, viewDX = 0, viewDY = 0, press = null;
+    for (const s of steps) {
+      if (s.k === 'start') { if (s.n > 1) { dragging = false; dragLast = null; continue; } dragging = true; dragLast = { x: s.x, y: s.y }; press = { x: s.x, y: s.y }; }
+      else if (s.k === 'move') { if (dragging && dragLast && s.n === 1) { viewDX += s.x - dragLast.x; viewDY += s.y - dragLast.y; dragLast = { x: s.x, y: s.y }; } }
+      else if (s.k === 'end') { if (dragging) { dragging = false; dragLast = null; } }
+    }
+    return { viewDX, viewDY, press };
+  };
+  const r1 = sim([{ k: 'start', x: 100, y: 100, n: 1 }, { k: 'move', x: 110, y: 104, n: 1 }, { k: 'move', x: 120, y: 108, n: 1 }, { k: 'move', x: 130, y: 112, n: 1 }, { k: 'end' }]);
+  check('单指拖动三步 → viewDX=30/viewDY=12（校准位移数据在触摸端可用）',
+    r1.viewDX === 30 && r1.viewDY === 12, `dx=${r1.viewDX},dy=${r1.viewDY}`);
+  const r2 = sim([{ k: 'start', x: 100, y: 100, n: 1 }, { k: 'end' }]);
+  check('tap 无位移 → delta 为 0 但 press 已记录（点击换色门槛 |press-click|<6 可判定）',
+    r2.viewDX === 0 && r2.viewDY === 0 && r2.press && r2.press.x === 100);
+  const r3 = sim([{ k: 'start', x: 100, y: 100, n: 1 }, { k: 'move', x: 105, y: 102, n: 1 }, { k: 'start', x: 120, y: 110, n: 2 }, { k: 'move', x: 150, y: 140, n: 2 }, { k: 'end' }]);
+  check('拖动中落双指 → 撤销跟踪，后续捏合移动不计入 delta',
+    r3.viewDX === 5 && r3.viewDY === 2, `dx=${r3.viewDX},dy=${r3.viewDY}`);
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');

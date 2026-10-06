@@ -2,7 +2,7 @@
 const fs = require('fs');
 const src = fs.readFileSync('wplace-overlay-autocolor.user.js', 'utf8');
 const pairs = [
-  ['ST.ovGone', 9], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 4],
+  ['ST.ovGone', 9], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 5],
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
@@ -31,7 +31,11 @@ const pairs = [
   ['styleMenuItems', 3], ['styleOpenMenu', 4], ['styleSetSelect', 7],
   ['styleCanvasSig', 6], ['styleWaitRender', 5], ['styleSnapshot', 4],
   ['styleScan', 4], ['STYLE_MIN_PAINTED', 2], ['STYLE_SKIP_RATE', 2],
-  ['STYLE_MARGIN', 4], ['label.dithering', 4]
+  ['STYLE_MARGIN', 4], ['label.dithering', 4],
+  // v2.6.1 移动端触摸拖动（HUD 面板 + 地图视图位移跟踪）
+  ['hudDragPos', 3], ['hudDragStart', 3], ['hudDragEnd', 4], ['dragHud', 11],
+  ['touchstart', 3], ['touchmove', 3], ['touchend', 2], ['touchcancel', 1],
+  ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 6], ['ST.viewDY', 6]
 ];
 let bad = 0;
 for (const [k, want] of pairs) {

@@ -2,9 +2,9 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.6.0
-// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆。
-// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads.
+// @version      2.6.1
+// @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
+// @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
 // @match        https://wplace.live/*
 // @run-at       document-start
@@ -1868,6 +1868,31 @@
     if (ST.dragging) { ST.dragging = false; ST.dragLast = null; }
   }, true);
 
+  // 触摸（移动端）：单指拖动地图与鼠标拖动同口径累计视图位移——校准的 viewDX/viewDY 在触摸端全靠它；
+  // passive 不拦截（官方地图要跟手），tap 无位移时合成 click 仍走点击换色/定位链路。
+  // 参照层手动拖动（桌面 Ctrl+拖）无对应触摸手势，移动端定位靠 location 自动校准
+  document.addEventListener('touchstart', function (e) {
+    if (!e.touches || !e.touches.length || !insideMap(e.target)) return;
+    if (e.touches.length > 1) { ST.dragging = false; ST.dragLast = null; return; } // 双指=官方捏合缩放，不跟踪
+    var t = e.touches[0];
+    ST.dragging = true; ST.dragLast = { x: t.clientX, y: t.clientY };
+    ST.press = { x: t.clientX, y: t.clientY };
+  }, { capture: true, passive: true });
+  document.addEventListener('touchmove', function (e) {
+    if (!e.touches || !e.touches.length || !insideMap(e.target)) return;
+    if (ST.dragging && ST.dragLast && e.touches.length === 1) {
+      var t = e.touches[0];
+      ST.viewDX += t.clientX - ST.dragLast.x;
+      ST.viewDY += t.clientY - ST.dragLast.y;
+      ST.dragLast = { x: t.clientX, y: t.clientY };
+      ST.lastMapMove = Date.now(); // 拖动地图：交互信号（与鼠标拖动同口径）
+    }
+    if (e.touches.length >= 2) markSuspect(); // 双指捏合缩放：视图即将重绘
+  }, { capture: true, passive: true });
+  document.addEventListener('touchend', function () {
+    if (ST.dragging) { ST.dragging = false; ST.dragLast = null; }
+  }, { capture: true, passive: true });
+
   function markSuspect() {
     ST.lastMapMove = Date.now(); // 视图交互：地图即将重绘，用作覆盖图存活检测的交互信号
     if (!ST.suspect) { ST.suspect = true; updateHud(); }
@@ -1882,9 +1907,6 @@
     }
     if (insideMap(e.target)) markSuspect();
   }, { capture: true, passive: false });
-  document.addEventListener('touchmove', function (e) {
-    if (e.touches && e.touches.length >= 2 && insideMap(e.target)) markSuspect();
-  }, { capture: true, passive: true });
   document.addEventListener('keydown', function (e) {
     if (e.key && e.key.indexOf('Arrow') === 0) markSuspect();
   }, true);
@@ -2457,7 +2479,7 @@
     hud.id = 'wpAC-hud';
     hud.style.cssText = 'position:fixed;right:12px;bottom:64px;z-index:2147483000;background:rgba(15,18,25,.9);color:#dfe6f3;' +
       'font:12px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif;padding:8px 12px;border-radius:10px;' +
-      'box-shadow:0 4px 16px rgba(0,0,0,.35);user-select:none;min-width:220px;max-width:320px;cursor:move;';
+      'box-shadow:0 4px 16px rgba(0,0,0,.35);user-select:none;min-width:220px;max-width:320px;cursor:move;touch-action:none;';
     hud.innerHTML =
       '<div style="display:flex;align-items:center;gap:6px;font-weight:600;">覆盖图自动选色' +
       '<span id="wpAC-onoff" style="font-weight:400;cursor:pointer;font-size:11px;padding:0 8px;border-radius:8px;background:#2d6a4f;">开</span>' +
@@ -2516,20 +2538,18 @@
       S.collapsed = !S.collapsed; saveSettings(); applyHudCollapsed();
     });
     var dragHud = null;
-    hud.addEventListener('mousedown', function (e) {
-      if (e.target.closest && e.target.closest('#wpAC-onoff,#wpAC-fold,#wpAC-btns')) return;
-      var r = hud.getBoundingClientRect();
-      dragHud = { dx: e.clientX - r.left, dy: e.clientY - r.top };
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', function (e) {
-      if (!dragHud) return;
-      var p = hudClampPos(e.clientX - dragHud.dx, e.clientY - dragHud.dy);
+    function hudDragPos(x, y) {
+      var p = hudClampPos(x, y);
       hud.style.left = p.x + 'px';
       hud.style.top = p.y + 'px';
       hud.style.right = 'auto'; hud.style.bottom = 'auto';
-    });
-    document.addEventListener('mouseup', function () {
+    }
+    function hudDragStart(cx, cy, target) {
+      if (target && target.closest && target.closest('#wpAC-onoff,#wpAC-fold,#wpAC-btns')) return;
+      var r = hud.getBoundingClientRect();
+      dragHud = { dx: cx - r.left, dy: cy - r.top };
+    }
+    function hudDragEnd() {
       if (!dragHud) return;
       dragHud = null;
       // 记住松手位置：下次刷新/重开恢复（跨会话记忆）
@@ -2539,7 +2559,31 @@
         S.pos = { x: Math.round(p.x), y: Math.round(p.y) };
         saveSettings();
       } catch (e) {}
+    }
+    hud.addEventListener('mousedown', function (e) {
+      hudDragStart(e.clientX, e.clientY, e.target);
+      if (dragHud) e.preventDefault();
     });
+    document.addEventListener('mousemove', function (e) {
+      if (!dragHud) return;
+      hudDragPos(e.clientX - dragHud.dx, e.clientY - dragHud.dy);
+    });
+    document.addEventListener('mouseup', hudDragEnd);
+    // 触摸拖动（移动端）：面板 touch-action:none 已挡掉浏览器滚动手势，touchmove 再 preventDefault 兜底旧浏览器；
+    // 按钮/折叠区照常 tap（touchstart 不 preventDefault，click 正常合成）
+    hud.addEventListener('touchstart', function (e) {
+      if (!e.touches || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      hudDragStart(t.clientX, t.clientY, t.target);
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      if (!dragHud || !e.touches || e.touches.length !== 1) return;
+      e.preventDefault();
+      var t = e.touches[0];
+      hudDragPos(t.clientX - dragHud.dx, t.clientY - dragHud.dy);
+    }, { capture: true, passive: false });
+    document.addEventListener('touchend', hudDragEnd, { capture: true, passive: true });
+    document.addEventListener('touchcancel', hudDragEnd, { capture: true, passive: true });
     // 恢复上次位置（无记录则保持默认右下角）
     if (S.pos) {
       var p0 = hudClampPos(S.pos.x, S.pos.y);
