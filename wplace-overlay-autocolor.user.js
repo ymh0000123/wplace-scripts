@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.8.0
+// @version      2.8.1
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料耗尽自动等待恢复后继续，没有库存的颜色自动跳过，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。按住空格手动连画时，脚本检测到本次将画的线段跨色边界会自动按颜色分段换色落笔，修复官方「整条线段单色」插值导致的快拖画错色（可关）。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-waiting when charges run out (resumes on its own) and auto-skipping colors that can't be painted (per-color stock depleted); painted pixels only enter the official draft and submission is always a manual click on the official Paint button. While you hold Space to chain-paint manually, the script detects cross-color strokes and splits them into per-color segments (recoloring before each injected move), fixing the official single-color line interpolation that mispaints when you drag fast across color boundaries (toggleable). Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
@@ -1858,6 +1858,7 @@
       return;
     }
     if (rtSegIntercept(e)) return; // v2.7.5：Space 连画跨色线段 → 拦截后分段换色注入
+    if (RT) { RT.x = e.clientX; RT.y = e.clientY; } // v2.8.1：放行原生的 move 官方落笔后 r=当前点，RT 同步镜像（此前只有拦截路径更新 RT，放行一条就漂移一次）
     if (ST.dragging && ST.dragLast) {
       ST.viewDX += e.clientX - ST.dragLast.x;
       ST.viewDY += e.clientY - ST.dragLast.y;
@@ -2028,7 +2029,12 @@
       var idx = nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]);
       // 校准状态下：已画对的像素不再换色（别人已画好/自己已画过，避免无意义切换）；
       // 画错的像素正常选目标色（指哪改哪），HUD 显示画布色对比。
-      var skip = hit.status === 1;
+      // v2.8.1 关键修复：空格连画（RT 非空）时不得跳过——模板画到中后期大量格子已画对，
+      // 跳过会让旧色留驻，官方原生把整条线段用旧色涂上，把已画对的格子成片涂错
+      //（实机扫描实证：画错格全是「相邻色的旧色整段盖上来」的双向散布）。连画时对
+      // 已画对像素照常 selectColor：若已是当前色，selectColor 内部 aria-pressed 早退，无开销。
+      if (hit.status === 1 && RT) SEGS.repaint++;
+      var skip = hit.status === 1 && !RT;
       if (S.hoverMode && !skip) selectColor(idx);
       updateHudColor(idx, hit.rgb, hit);
     } else {
@@ -2048,21 +2054,26 @@
   // 线段时拦下这条真实 mousemove（stopPropagation → 官方 window 冒泡收不到），按颜色
   // 分段：每段先 selectColor 再注入合成 mousemove（官方对 mousemove 不查 isTrusted，
   // 与补画引擎同链路），官方对每段做自己的插值落笔 → 每段同色 → 全线正确。
-  // 单色线段不拦截（零开销零风险，官方原生处理）。RT 跟踪与官方连画状态可能漂移
-  // （onColorReselect 分支/中断时序），所有误拦路径最终都退化为「官方 Rt=false 时注入
-  // 不落笔、仅更新官方上一落点」，加上绘画模式守卫后漂移无害。
+  // 单色线段不拦截（零开销零风险，官方原生处理）。RT 在放行路径同步镜像官方 r
+  // （v2.8.1：此前只有拦截路径更新 RT，放行一条原生 move 后 RT 就与官方 r 漂移）。
+  // v2.8.1 降级策略：取不到色的采样点并入相邻段、锁定/透明的段跳过选色但保持覆盖
+  // （官方连画无法跳格，这些格子原生同样会被涂，并段至少保证其余格子颜色全对），
+  // 仅当整条线段完全无法处理时才放回原生。SEGS 计数导出到 __wpACDiag.dump 供报障诊断。
   var RT = null; // {x, y} Space 按住期间的官方「上一落点」（屏幕坐标）；null=未按住
+  var SEGS = { intercepted: 0, segs: 0, skippedSeg: 0, nativeSpan: 0, allDead: 0, repaint: 0 }; // v2.8.1 分段/纠色计数
   function rtColorAt(x, y) {
     var hit = pickColorAt(x, y);
     return hit ? nearestPaletteIdx(hit.rgb[0], hit.rgb[1], hit.rgb[2]) : null;
   }
   // 采样点压缩成同色段：[{x,y,c}] → [{c,x,y}]（c=段色，x/y=段终点）。
-  // 任一点取不到色（模板外/官方覆盖图未渲染）→ null = 无法安全分段
+  // v2.8.1：取不到色的采样点（模板透明/模板外）并入相邻段而非整体放弃——官方连画
+  // 对线段逐像素落笔，透明格无论如何都会被涂，并段至少保证其余格子颜色全对；
+  // 全部采样点都取不到色才返回 null（放回原生）
   function rtCompressSamples(samples) {
     var segs = [];
     for (var i = 0; i < samples.length; i++) {
       var s = samples[i];
-      if (s.c == null) return null;
+      if (s.c == null) continue; // 透明/未知：并入相邻段（由相邻段的插值覆盖）
       var last = segs.length ? segs[segs.length - 1] : null;
       if (last && last.c === s.c) { last.x = s.x; last.y = s.y; continue; }
       segs.push({ c: s.c, x: s.x, y: s.y });
@@ -2093,18 +2104,22 @@
       samples.push({ x: x0 + dx * f, y: y0 + dy * f, c: rtColorAt(x0 + dx * f, y0 + dy * f) });
     }
     var segs = rtCompressSamples(samples);
-    if (!segs || segs.length < 2) return false;               // 单色线段：放行官方原生（最常见路径）
-    for (var k = 0; k < segs.length; k++) {                   // 全段预检：任一段选不了色就整体放弃（维持原生）
-      if (!rtCanSelect(segs[k].c)) return false;
-    }
+    if (!segs || segs.length < 2) { SEGS.nativeSpan++; return false; } // 单色/全透明线段：放行官方原生（最常见路径）
+    var selectable = false;
+    for (var k = 0; k < segs.length; k++) if (rtCanSelect(segs[k].c)) { selectable = true; break; }
+    if (!selectable) { SEGS.allDead++; return false; } // 全部段选不了色（全锁定）：只能放回原生
     e.stopPropagation(); // 官方 window 冒泡 mousemove（原生线段落笔）收不到，改由分段注入驱动
+    var lastInj = null, nInj = 0;
     for (var s = 0; s < segs.length; s++) {
-      selectColor(segs[s].c);          // 派发内同步生效（React 离散事件同步 flush，v2.7.4 实证）
+      if (!rtCanSelect(segs[s].c)) { SEGS.skippedSeg++; continue; } // v2.8.1 降级：锁定/透明的段不选色但保持覆盖——后续段的插值会盖过该段（官方连画无法跳格，原生同样会涂）
+      selectColor(segs[s].c);            // 派发内同步生效（React 离散事件同步 flush，v2.7.4 实证）
       bpInjectMove(segs[s].x, segs[s].y); // 官方涂「官方上一落点→本段终点」（本段同色）
+      lastInj = segs[s]; nInj++;
     }
-    RT.x = x1; RT.y = y1;            // 官方上一落点 = 最后一条注入事件位置 = 真实当前位置
-    var pc = PALETTE[segs[segs.length - 1].c];
-    updateHudColor(segs[segs.length - 1].c, [pc[1], pc[2], pc[3]]);
+    RT.x = lastInj.x; RT.y = lastInj.y; // 官方上一落点 = 最后一条注入事件位置（尾段被跳过时≠真实光标，下一条 move 从这里续）
+    SEGS.intercepted++; SEGS.segs += nInj;
+    var pc = PALETTE[lastInj.c];
+    updateHudColor(lastInj.c, [pc[1], pc[2], pc[3]]);
     return true;
   }
   // Space 连画状态跟踪（官方同样挂 document keydown/keyup，不查 isTrusted；
@@ -3428,7 +3443,7 @@
   uw.__wpACDiag = {
     dump: function () {
       var out = {
-        v: '2.8.0',
+        v: '2.8.1',
         t: Date.now(),
         settings: { enabled: S.enabled, hoverMode: S.hoverMode, segFix: S.segFix, overlay: S.overlay },
         tiles: ST.tiles.length,
@@ -3445,6 +3460,7 @@
         calibMsg: ST.calibMsg,
         ovGone: !!ST.ovGone, ovPlaced: !!OV.placed,
         rt: RT ? { x: RT.x, y: RT.y } : null,
+        seg: SEGS, // v2.8.1 分段/纠色计数（intercepted 拦截注入数/segs 注入段数/skippedSeg 降级跳过段数/nativeSpan 放行单色段数/allDead 全不可选放弃数/repaint 连画中对已画对像素强制换色数）
         bp: BP ? {
           phase: BP.phase, ri: BP.ri, runs: BP.runs ? BP.runs.length : 0,
           painted: BP.painted, missed: BP.missed, skippedRuns: BP.skippedRuns,

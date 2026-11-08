@@ -36,6 +36,9 @@ const pairs = [
   ['hudDragPos', 3], ['hudDragStart', 3], ['hudDragEnd', 4], ['dragHud', 11],
   ['touchstart', 4], ['touchmove', 3], ['touchend', 2], ['touchcancel', 1],
   ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 7], ['ST.viewDY', 7],
+  // v2.7.5/v2.8.1 空格连画跨色分段（RT 跟踪 + 降级策略 + 计数）
+  ['RT.x', 4], ['RT.y', 4], ['SEGS.', 6], ['lastInj', 6],
+  ['rtSegIntercept', 2], ['rtCanSelect', 4], ['rtCompressSamples', 2], ['rtColorAt', 3],
   // v2.7.0 框选自动补画（拟人化 · 手动提交）
   ['bpSrcToScreen', 4], ['bpSrcToWorld', 2], ['bpRunsFromPixels', 2],
   ['bpChargesInfo', 3], ['bpInjectMove', 4], ['bpInjectSpace', 3],

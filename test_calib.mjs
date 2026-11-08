@@ -655,7 +655,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
+check("版本 2.7.4", SRC.includes("// @version      2.8.1"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -990,7 +990,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
+check("版本 2.7.4", SRC.includes("// @version      2.8.1"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1089,7 +1089,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
+  check("版本 2.7.4", SRC.includes("// @version      2.8.1"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1137,7 +1137,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
+  check("版本 2.7.4", SRC.includes("// @version      2.8.1"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1436,8 +1436,8 @@ console.log('== E13: v2.7.5 空格连画跨色分段 —— 官方线段插值�
     SRC.includes('if (document.hidden) RT = null;'));
   check('绘画模式守卫（paletteRoot 不存在不拦——RT 与官方 Rt 漂移时注入不落笔，无害退化）',
     /rtSegIntercept[\s\S]{0,1200}?paletteRoot\(\)/.test(SRC));
-  check('单色线段放行官方原生（最常见路径零开销零风险）',
-    SRC.includes('if (!segs || segs.length < 2) return false;'));
+  check('单色线段放行官方原生（最常见路径零开销零风险，v2.8.1 起带 nativeSpan 计数）',
+    SRC.includes('if (!segs || segs.length < 2) { SEGS.nativeSpan++; return false; }'));
   check('左键拖图/Ctrl 拖参照层/补画引擎运行时不介入',
     SRC.includes('if (ST.dragging || ovDrag || e.ctrlKey || (e.buttons & 1)) return false;') &&
     SRC.includes("if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return false; // 补画引擎自管分段"));
@@ -1452,12 +1452,12 @@ console.log('== E13: v2.7.5 空格连画跨色分段 —— 官方线段插值�
     SRC.includes('selectColor._lastWant = idx;') &&
     SRC.includes('if (selectColor._lastWant === idx &&'));
 
-  // rtCompressSamples 独立复刻（与脚本逐行同逻辑）
+  // rtCompressSamples 独立复刻（与脚本逐行同逻辑，v2.8.1：null 采样并入相邻段）
   function rtCompressSamples(samples) {
     var segs = [];
     for (var i = 0; i < samples.length; i++) {
       var s = samples[i];
-      if (s.c == null) return null;
+      if (s.c == null) continue;
       var last = segs.length ? segs[segs.length - 1] : null;
       if (last && last.c === s.c) { last.x = s.x; last.y = s.y; continue; }
       segs.push({ c: s.c, x: s.x, y: s.y });
@@ -1471,11 +1471,11 @@ console.log('== E13: v2.7.5 空格连画跨色分段 —— 官方线段插值�
     S1.length === 3 && S1[0].c === 5 && S1[0].x === 1 && S1[1].c === 19 && S1[1].x === 4 && S1[2].c === 5 && S1[2].x === 5);
   check('单色线段压成 1 段 → 调用方放行原生',
     rtCompressSamples([{ x: 0, y: 0, c: 7 }, { x: 5, y: 3, c: 7 }]).length === 1);
-  check('采样点取不到色（模板外/覆盖图未渲染）→ null 放弃整条分段',
-    rtCompressSamples([{ x: 0, y: 0, c: 7 }, { x: 3, y: 0, c: null }]) === null);
+  check('采样点取不到色 → 并入相邻段不再放弃整条（v2.8.1 降级，场景测试见 E15）',
+    rtCompressSamples([{ x: 0, y: 0, c: 7 }, { x: 3, y: 0, c: null }]).length === 1);
   check('空采样 → null',
     rtCompressSamples([]) === null);
-  check('透明色(0)/无效色不可选 → rtCanSelect 拒绝整段（官方连画跨透明区无法跳过）',
+  check('透明色(0)/无效色不可选 → rtCanSelect 拒绝该段（v2.8.1 起跳过该段不放弃整条）',
     /function rtCanSelect\(idx\) \{\s*if \(!idx \|\| idx < 1\) return false;/.test(SRC));
 }
 
@@ -1506,6 +1506,65 @@ console.log('== E14: v2.8.0 诊断出口 —— AI 报障自诊断基建 ==');
     DIAG.includes('库存 0 的色能选中但放置被拒') &&
     DIAG.includes('phase=run 运行中') &&
     DIAG.includes('常见故障速查'));
+}
+
+console.log('== E15: v2.8.1 连画旧色整段涂错 —— 已画对跳过 / RT 漂移 / 分段降级 ==');
+{
+  // 实机扫描实证（sctl 直读 + 校准 δ(0,0) 匹配 93%，2026-11-08）：模板 35% 进度下快拖
+  // 空格连画，画错格全是「相邻色的旧色整段盖上来」的双向散布（要 Beige 画成 White、
+  // 要 White 画成 Beige、DG 区旁一排 White 被涂成 DG）。根因链：
+  // ①schedulePick 对已画对像素跳过换色 → 空格连画时旧色留驻 → 官方原生把整条线段
+  //   用旧色涂上，把已画对的格子成片涂错（模板中后期大量格子已画对，快拖每次跨格必中）；
+  // ②放行原生的 move 不更新 RT → RT 与官方 r 漂移（自愈但依赖线段几何）；
+  // ③分段遇 null 采样（模板透明格）/锁定色整条放弃 → 放回原生 → 旧色整段。
+  check('版本 2.8.1', SRC.includes('// @version      2.8.1'));
+  check('关键修复①：连画（RT 非空）时已画对像素不跳过换色（repaint 计数 + skip 条件带 !RT）',
+    SRC.includes('if (hit.status === 1 && RT) SEGS.repaint++;') &&
+    SRC.includes('var skip = hit.status === 1 && !RT;'));
+  check('关键修复①注释说明危害与开销（已是当前色时 selectColor 内部早退）',
+    SRC.includes('v2.8.1 关键修复：空格连画（RT 非空）时不得跳过') &&
+    SRC.includes('selectColor 内部 aria-pressed 早退，无开销'));
+  check('关键修复②：放行原生的 move 同步镜像 RT=官方 r',
+    SRC.includes('if (RT) { RT.x = e.clientX; RT.y = e.clientY; } // v2.8.1'));
+  check('关键修复③a：rtCompressSamples 采样取不到色并入相邻段（不再整体放弃）',
+    SRC.includes('if (s.c == null) continue; // 透明/未知：并入相邻段（由相邻段的插值覆盖）'));
+  check('关键修复③b：锁定/透明段跳过选色但保持覆盖（continue 而非放弃整条）',
+    SRC.includes('if (!rtCanSelect(segs[s].c)) { SEGS.skippedSeg++; continue; }'));
+  check('关键修复③c：全段不可选的预检在 stopPropagation 之前（防拦下事件却不注入 → 官方 r 不前进丢整条 move）',
+    /var selectable = false;[\s\S]{0,200}if \(!selectable\) \{ SEGS\.allDead\+\+; return false; \}[\s\S]{0,160}e\.stopPropagation\(\)/.test(SRC));
+  check('拦截后 RT=最后注入段终点（尾段被跳过时≠真实光标，与官方 r 保持一致）',
+    SRC.includes('RT.x = lastInj.x; RT.y = lastInj.y;'));
+  check('SEGS 计数导出到 dump（报障时 sctl 直读秒定位拦截/降级/放行分布）',
+    SRC.includes('var SEGS = { intercepted: 0, segs: 0, skippedSeg: 0, nativeSpan: 0, allDead: 0, repaint: 0 };') &&
+    SRC.includes('seg: SEGS,'));
+
+  // v2.8.1 降级策略场景复刻（与脚本逐行同逻辑）
+  function rtCompress2(samples) {
+    var segs = [];
+    for (var i = 0; i < samples.length; i++) {
+      var s = samples[i];
+      if (s.c == null) continue;
+      var last = segs.length ? segs[segs.length - 1] : null;
+      if (last && last.c === s.c) { last.x = s.x; last.y = s.y; continue; }
+      segs.push({ c: s.c, x: s.x, y: s.y });
+    }
+    return segs.length ? segs : null;
+  }
+  var D1 = rtCompress2([
+    { x: 0, y: 0, c: 2 }, { x: 8, y: 0, c: 2 }, { x: 16, y: 0, c: 5 }, { x: 30, y: 0, c: 5 }]);
+  check('跨色线段照常压缩（回归：DG 区→White 区，实机 718~796,204 画错带场景）',
+    D1.length === 2 && D1[0].c === 2 && D1[0].x === 8 && D1[1].c === 5 && D1[1].x === 30);
+  var D2 = rtCompress2([
+    { x: 0, y: 0, c: 5 }, { x: 10, y: 0, c: null }, { x: 20, y: 0, c: null }, { x: 30, y: 0, c: 19 }]);
+  check('中部透明格并入相邻段：两端段照常分段（透明格由后续段插值覆盖，原生同样会涂）',
+    D2.length === 2 && D2[0].c === 5 && D2[0].x === 0 && D2[1].c === 19 && D2[1].x === 30);
+  var D3 = rtCompress2([{ x: 0, y: 0, c: null }, { x: 10, y: 0, c: null }]);
+  check('全透明线段 → null 放回原生（这些格子原生也会被涂，行为一致）', D3 === null);
+  var D4 = rtCompress2([{ x: 0, y: 0, c: null }, { x: 10, y: 0, c: 5 }, { x: 20, y: 0, c: 5 }]);
+  check('头部透明格裁掉，首段从首个可取色点起（官方从 r 插值过来顺带涂过头部）',
+    D4.length === 1 && D4[0].c === 5 && D4[0].x === 20);
+  check('skip 语义回归：无 RT（纯悬停）已画对仍跳过（原悬停 UX 不变）',
+    /var skip = hit\.status === 1 && !RT;/.test(SRC));
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');
