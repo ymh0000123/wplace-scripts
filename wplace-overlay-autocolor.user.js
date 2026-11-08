@@ -2,7 +2,7 @@
 // @name         Wplace Overlay 自动选色
 // @name:en      Wplace Overlay Auto Color
 // @namespace    https://wplace.live/
-// @version      2.7.5
+// @version      2.7.6
 // @description  在 wplace.live 打开覆盖图(Overlay)作画时，鼠标所指的覆盖图像素自动匹配官方调色板并选中对应颜色（悬停即换 / 点击换色两种模式）。参照层自动贴合官方覆盖图：劫持官方渲染 uniform 用官方矩阵重放屏幕几何，缩放/拖动全程像素级跟随，无需手动定位。「对齐校准」：别人已把图案画在画布上时，hook 官方地图瓦片像素与模板逐像素比对，自动算出位置偏移并平移参照层预览，一键写入官方模板 bounds（刷新后官方覆盖图精确对齐已画内容），同时统计已画对/画错/未画并叠加高亮，取色时直接给出改正颜色。校准命中后自动识别画手的颜色风格：逐组合实测官方颜色设置（色板×颜色模式×抖动）下模板渲染与已画内容的精确吻合率，自动切到最吻合的组合，让后续补画与已有画风一致。「🖌 补画」：框选任意范围自动把模板要求的颜色画进官方草稿——按官方绘画交互逆向出的安全注入链路（Space+鼠标移动连画，绕开官方的合成事件检测），拟人节奏（随机步幅/间隔/停顿/换色等待），颜料耗尽自动等待恢复后继续，没有库存的颜色自动跳过，画完只进官方草稿，提交永远由你手动点击官方 Paint 按钮。按住空格手动连画时，脚本检测到本次将画的线段跨色边界会自动按颜色分段换色落笔，修复官方「整条线段单色」插值导致的快拖画错色（可关）。跳过锁定色块（避免 Unlock 弹窗引发地图重排）与当前已选中色块（避免官方 onColorReselect 的 flyTo 导航造成画面飞移）。官方覆盖图停止渲染（退出覆盖模式/隐藏模板）时参照层自动收起，重新显示后自动恢复；状态窗可折叠（Ctrl+Shift+H 随时找回），折叠状态与位置跨刷新记忆；状态窗与地图拖动均已适配移动端触摸（单指拖地图同口径累计视图位移，校准照常可用）。
 // @description:en  Auto-matches the overlay pixel under your cursor on wplace.live to the official palette. The reference layer auto-aligns with the official overlay by replaying its render uniforms through the official matrix, tracking zoom/pan pixel-perfectly. "Align & Calibrate": when others already painted the artwork on the canvas, hooks official map tile pixels and compares them with the template to compute the offset — shifts the reference layer for instant preview, writes the official template bounds on demand (refresh to snap the official overlay onto the painted content), and overlays done/wrong/missing status so each color fix is one glance away. After a successful alignment it auto-detects the painter's color style by measuring the template render against the painted pixels across official color settings (palette × color mode × dithering) and switches to the best-matching combo. "🖌 Box Paint": drag-select any region and the script paints the template's required colors into the official draft automatically — using the safe injection path reverse-engineered from the official painting interaction (Space + mouse-move chain painting, bypassing the official synthetic-event detection), with human-like pacing (random strides/pauses/color-switch delays), auto-waiting when charges run out (resumes on its own) and auto-skipping colors that can't be painted (per-color stock depleted); painted pixels only enter the official draft and submission is always a manual click on the official Paint button. While you hold Space to chain-paint manually, the script detects cross-color strokes and splits them into per-color segments (recoloring before each injected move), fixing the official single-color line interpolation that mispaints when you drag fast across color boundaries (toggleable). Skips locked swatches (their click opens the Unlock paywall dialog, which reflows/resizes the map) and the currently-selected swatch (re-clicking it triggers the official template-build "relocate to color" flyTo, making the map jump around). Auto-hides the reference layer when the official overlay stops rendering (leaving overlay mode / hiding templates) and restores it when rendering resumes; the HUD panel is collapsible (Ctrl+Shift+H to toggle), and its collapsed state and position persist across reloads; both the HUD panel and map panning are touch-ready for mobile (single-finger map drag feeds the same view-delta tracker, calibration works there too).
 // @author       you
@@ -3093,6 +3093,7 @@
       '<span id="wpAC-fold" style="cursor:pointer;opacity:.7;margin-left:auto;font-size:13px;line-height:1;padding:2px 6px;">—</span></div>' +
       '<div id="wpAC-btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;">' +
       '<span class="wpAC-btn" id="wpAC-mode"></span>' +
+      '<span class="wpAC-btn" id="wpAC-seg"></span>' +
       '<span class="wpAC-btn" id="wpAC-layer"></span>' +
       '<span class="wpAC-btn" id="wpAC-zin">＋</span>' +
       '<span class="wpAC-btn" id="wpAC-zout">－</span>' +
@@ -3113,6 +3114,9 @@
     // 快捷按钮（与油猴菜单等效，状态实时显示在按钮文字上）
     hud.querySelector('#wpAC-mode').addEventListener('click', function () {
       S.hoverMode = !S.hoverMode; saveSettings(); updateHud();
+    });
+    hud.querySelector('#wpAC-seg').addEventListener('click', function () {
+      S.segFix = !S.segFix; saveSettings(); updateHud();
     });
     hud.querySelector('#wpAC-layer').addEventListener('click', function () {
       S.overlay = S.overlay === 0 ? 0.3 : (S.overlay === 0.3 ? 0.5 : (S.overlay === 0.5 ? 0.7 : 0));
@@ -3237,6 +3241,13 @@
     if (!hud) return;
     var b = hud.querySelector('#wpAC-mode');
     if (b) b.textContent = S.hoverMode ? '悬停换色' : '点击换色';
+    b = hud.querySelector('#wpAC-seg');
+    if (b) {
+      // v2.7.5 空格连画跨色分段开关（@grant none 下无 GM 菜单，入口全在 HUD）
+      b.textContent = S.segFix ? '空格分段' : '空格分段 关';
+      b.className = 'wpAC-btn' + (S.segFix ? ' on' : '');
+      b.title = '按住空格快拖时把跨色线段按颜色分段换色落笔，修复官方整条线段单色导致的画错色';
+    }
     b = hud.querySelector('#wpAC-layer');
     if (b) {
       b.textContent = S.overlay ? '图层 ' + Math.round(S.overlay * 100) + '%' : '图层 关';
