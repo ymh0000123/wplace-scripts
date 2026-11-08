@@ -2,11 +2,11 @@
 const fs = require('fs');
 const src = fs.readFileSync('wplace-overlay-autocolor.user.js', 'utf8');
 const pairs = [
-  ['ST.ovGone', 9], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 7],
+  ['ST.ovGone', 10], ['ST.lastScrDraw', 5], ['ST.lastMapMove', 9],
   ['S.collapsed', 13], ['S.pos', 4], ['applyHudCollapsed', 5], ['checkOvAlive', 2],
   ['hudClampPos', 4], ['wpAC-fold', 4], ['wpAC-colorrow', 2], ['wpAC-close', 0], ['showToast', 2],
   // v2.5.0 对齐校准
-  ['ST.calib', 108], ['ST.mapTiles', 14], ['ST.calibMsg', 27], ['ST.progRev', 5],
+  ['ST.calib', 113], ['ST.mapTiles', 14], ['ST.calibMsg', 28], ['ST.progRev', 5],
   ['runCalibrate', 2], ['fullScan', 6], ['scoreOffset', 2], ['canvasPixelAt', 7],
   ['applyCalibToStorage', 3], ['clearCalib', 5], ['refreshCalibStats', 3],
   ['parseTileUrl', 2], ['decodeTile', 3], ['storeMapTile', 2], ['patchFetch', 2],
@@ -35,7 +35,7 @@ const pairs = [
   // v2.6.1 移动端触摸拖动（HUD 面板 + 地图视图位移跟踪）
   ['hudDragPos', 3], ['hudDragStart', 3], ['hudDragEnd', 4], ['dragHud', 11],
   ['touchstart', 4], ['touchmove', 3], ['touchend', 2], ['touchcancel', 1],
-  ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 6], ['ST.viewDY', 6],
+  ['touch-action', 2], ['ST.press', 5], ['ST.viewDX', 7], ['ST.viewDY', 7],
   // v2.7.0 框选自动补画（拟人化 · 手动提交）
   ['bpSrcToScreen', 4], ['bpSrcToWorld', 2], ['bpRunsFromPixels', 2],
   ['bpChargesInfo', 3], ['bpInjectMove', 4], ['bpInjectSpace', 3],
@@ -44,12 +44,12 @@ const pairs = [
   ['bpStartBox', 2], ['bpBoxCleanup', 6], ['bpBuildPlan', 2], ['bpPlanReady', 2],
   ['bpPreflight', 2], ['BP_STEP_PX', 2], ['BP_STEP_MS', 2],
   ['BP_STROKE_MS', 2], ['wpAC-bp', 7], ['wpAC-bpx', 3], ['bpBoxEl', 5],
-  ['BP.phase', 25], ['BP.msg', 13], ['BP.ri', 9], ['BP.painted', 4],
-  ['BP.missed', 5], ['ST.lastMapMove', 7],
+  ['BP.phase', 26], ['BP.msg', 14], ['BP.ri', 12], ['BP.painted', 5],
+  ['BP.missed', 6], ['ST.lastMapMove', 9],
   // v2.7.1 涂不上自动跳色（颜料按色分库存 remainingColorCounts）
-  ['bpSkipColor', 3], ['BP.skippedRuns', 4], ['BP.streakSkips', 5], ['bpSleep', 11],
+  ['bpSkipColor', 3], ['BP.skippedRuns', 5], ['BP.streakSkips', 6], ['bpSleep', 11],
   // v2.7.3 canvas 指纹/库存预判/恢复点等待（charges 数字官方画进 canvas，DOM 读不到）
-  ['BP.lastDraftFp', 2], ['BP.waitRounds', 5], ['bpColorStock', 2], ['cooldownSec', 3], ['draftFp', 8]
+  ['BP.lastDraftFp', 2], ['BP.waitRounds', 6], ['bpColorStock', 2], ['cooldownSec', 3], ['draftFp', 8]
 ];
 let bad = 0;
 for (const [k, want] of pairs) {

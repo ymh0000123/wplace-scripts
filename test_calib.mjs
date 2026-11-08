@@ -9,6 +9,8 @@ function check(name, cond, detail) {
   else { fail++; console.log('FAIL  ' + name + (detail ? ' :: ' + detail : '')); }
 }
 const SRC = fs.readFileSync(new URL('./wplace-overlay-autocolor.user.js', import.meta.url), 'utf8');
+const DIAG = fs.existsSync(new URL('./wplace-diag.user.js', import.meta.url))
+  ? fs.readFileSync(new URL('./wplace-diag.user.js', import.meta.url), 'utf8') : '';
 
 // ---------- 源码一致性断言（防测试复刻与实现漂移） ----------
 console.log('== C0: 源码常量一致 ==');
@@ -653,7 +655,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.4", SRC.includes("// @version      2.7.7"));
+check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +990,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.4", SRC.includes("// @version      2.7.7"));
+check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1089,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.7.7"));
+  check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,7 +1137,7 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.7.7"));
+  check("版本 2.7.4", SRC.includes("// @version      2.8.0"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
@@ -1475,6 +1477,35 @@ console.log('== E13: v2.7.5 空格连画跨色分段 —— 官方线段插值�
     rtCompressSamples([]) === null);
   check('透明色(0)/无效色不可选 → rtCanSelect 拒绝整段（官方连画跨透明区无法跳过）',
     /function rtCanSelect\(idx\) \{\s*if \(!idx \|\| idx < 1\) return false;/.test(SRC));
+}
+
+console.log('== E14: v2.8.0 诊断出口 —— AI 报障自诊断基建 ==');
+{
+  check('主脚本挂只读快照出口 uw.__wpACDiag.dump（页面 window 可读，@grant none 上下文）',
+    SRC.includes('uw.__wpACDiag = {') &&
+    SRC.includes('dump: function () {'));
+  check('快照覆盖关键诊断面：设置/瓦片/校准/补画引擎 BP/色板/Paint 按钮',
+    SRC.includes('settings: { enabled: S.enabled, hoverMode: S.hoverMode, segFix: S.segFix, overlay: S.overlay }') &&
+    SRC.includes('curRun: BP.runs && BP.runs[BP.ri] ? BP.runs[BP.ri] : null') &&
+    SRC.includes("root.querySelector('button[aria-pressed=\"true\"]')") &&
+    SRC.includes("txt.indexOf('Paint') === 0 && txt.indexOf('Paint pixel') !== 0"));
+  check('快照纯只读无副作用（无定时器注入、无敏感字段：不出现 token/cookie 导出）',
+    /__wpACDiag[\s\S]{0,3200}(?!setInterval|setTimeout)/.test(SRC) &&
+    !/__wpACDiag[\s\S]{0,3200}(token|cookie|discordId)/i.test(SRC));
+  check('诊断脚本存在且声明 CAT.agent.conversation grant（ScriptCat 专属）',
+    DIAG.includes('@grant        CAT.agent.conversation') &&
+    DIAG.includes('CAT.agent.conversation.create'));
+  check('诊断脚本经 unsafeWindow 读快照 + get_diag/get_dom 双工具 + 对话 id 复用（防对话爆炸）',
+    DIAG.includes('uw.__wpACDiag.dump()') &&
+    DIAG.includes("name: 'get_diag'") &&
+    DIAG.includes("name: 'get_dom'") &&
+    DIAG.includes('CONV_ID_KEY'));
+  check('诊断脚本 system 提示词内置领域知识与故障速查（线段插值/charges canvas/按色库存/BP 状态语义）',
+    DIAG.includes('整条线段插值落笔') &&
+    DIAG.includes('charges<max 正在恢复') &&
+    DIAG.includes('库存 0 的色能选中但放置被拒') &&
+    DIAG.includes('phase=run 运行中') &&
+    DIAG.includes('常见故障速查'));
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');

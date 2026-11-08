@@ -39,18 +39,23 @@
 
 wplace.live 界面中文化。站点自带的中文语言包在隐藏菜单里，本脚本通过 `localStorage.PARAGLIDE_LOCALE = 'ch'` 启用并补充翻译。
 
+### [wplace-diag.user.js](wplace-diag.user.js) — 脚本诊断助手（可选）
+
+配合主脚本（≥2.8.0）使用的 AI 报障助手：主脚本把只读运行现场挂到 `window.__wpACDiag.dump()`（版本/设置/瓦片/校准/补画引擎 BP 状态/色板/Paint 按钮快照），本脚本注册 `get_diag` / `get_dom` 两个工具给 ScriptCat Agent（`@grant CAT.agent.conversation`），在 ScriptCat 侧边栏「Wplace 诊断」对话里直接用中文描述问题（例：「补画暂停了帮我看看」），AI 调工具读现场后给出结论与建议——系统提示词内置官方 UI 逆向知识（线段插值落笔、charges 画在 canvas、按色分库存等）与故障速查表。**仅在 ScriptCat 可用**（需在 ScriptCat「设置 → Agent」配置模型）；主脚本本身零依赖零改动风险（只读出口、无定时器、不含敏感信息）。Tampermonkey 用户装了也没用（无 CAT.agent API，控制台会报创建失败警告，可忽略或跳过安装）。
+
 ## 安装
 
 1. 浏览器安装 [ScriptCat](https://scriptcat.org/) 或 Tampermonkey
 2. 新建脚本，粘贴对应 `.user.js` 文件内容并保存
 3. 打开 wplace.live 生效
+4. （可选）诊断助手 wplace-diag.user.js 仅支持 ScriptCat，需另在 ScriptCat「设置 → Agent」中配置模型
 
 ## 本地测试
 
 ```bash
 node test_capture.mjs    # 捕获管线回归（22 项）：WebGL 捕获 → 坐标归属 → uniform 重放
 node test_uifixes.mjs    # UI 状态机仿真（23 项）：覆盖模式检测 / 折叠 / 位置记忆
-node test_calib.mjs      # 对齐校准仿真（248 项）：坐标换算 / 偏移搜索 / 状态统计 / bounds 写回 / 编辑会话与主动补抓 / 风格识别 / 触摸拖动 / 框选补画
+node test_calib.mjs      # 对齐校准仿真（265 项）：坐标换算 / 偏移搜索 / 状态统计 / bounds 写回 / 编辑会话与主动补抓 / 风格识别 / 触摸拖动 / 框选补画 / 空格连画分段 / 诊断出口
 node check_refs.cjs      # 标识符定义/引用计数一致性校验
 ```
 
@@ -60,6 +65,7 @@ node check_refs.cjs      # 标识符定义/引用计数一致性校验
 
 | 版本 | 要点 |
 | --- | --- |
+| 2.8.0 | AI 报障自诊断基建：主脚本新增只读快照出口 `window.__wpACDiag.dump()`（版本/设置/瓦片/校准/补画引擎 BP 状态/色板与 Paint 按钮状态；无定时器、无敏感信息、诊断脚本未装时零开销），新增独立诊断脚本 wplace-diag.user.js（ScriptCat 专属，`@grant CAT.agent.conversation` + `get_diag`/`get_dom` 工具 + 内置官方 UI 逆向知识与故障速查表）——ScriptCat 侧边栏「Wplace 诊断」对话里直接描述问题，AI 调工具读现场就地分析，主脚本不被拖进沙箱（localStorage hook/fetch 管线零风险） |
 | 2.7.7 | 修复补画引擎「一口气画完但整条线段画错色」（v2.7.5 回归，实锤根因）：v2.7.5 新增的 Space keydown 纠色监听没有排除补画引擎——引擎的合成 keydown 也会进监听器，把刚 bpEnsureColor 选好的色改成「用户真实鼠标悬停处」的模板色，导致引擎每条线段开画前选色全被破坏、整条 run 画成鼠标所在位置的颜色。现补画引擎运行（run/pause/wait）时 keydown 处理完全跳过（不置连画跟踪、不纠色），手动空格连画纠色不受影响 |
 | 2.7.6 | v2.7.5 的分段开关补上 HUD 入口「空格分段」按钮（2.7.5 只写了油猴菜单入口——脚本 `@grant none` 下 GM 菜单根本不存在，是发布说明的错误引导）：状态窗按钮行新增「空格分段 / 空格分段 关」，与「悬停换色」同款高亮，点击即切换并跨刷新记忆 |
 | 2.7.5 | 修复按住空格快拖时「经常来不及换色」（chunk 逆向实锤根因）：官方连画不是逐像素落笔，而是把「上一点→当前点」的**整条线段**插值写入草稿（Cjvnvx56 的 `Ie(n,r)`），全用当前选中色——v2.7.4 的同步换色只保证线段**终点**像素正确，快拖一次 mousemove 跨十几个像素，线段上跨色边界的部分必然用旧色画（慢速逐像素画不受影响）。现在 Space 按住期间脚本检测到「本次将画的线段跨色」就拦下这条真实 mousemove（stopPropagation，官方 window 冒泡收不到），按颜色分段：每段先换色再注入合成 mousemove（官方对 mousemove 不查 isTrusted，与补画引擎同链路），官方对每段自己插值落笔 → 每段同色 → 全线正确；单色线段不拦截（零开销原生处理），左键拖图/Ctrl 拖参照层/补画引擎运行时不介入，任何一段选不了色（锁定/透明）整体放弃维持原生。顺带修复换色补验会把色强改回上一个像素的色（快速跨色时 120ms 补验没检查该色是否仍是最后请求），并新增 Space keydown 纠色：官方按下瞬间会涂「上一落点」，防止已画对像素被旧色涂坏 |
