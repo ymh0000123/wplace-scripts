@@ -39,12 +39,12 @@ const pairs = [
   // v2.7.0 框选自动补画（拟人化 · 手动提交）
   ['bpSrcToScreen', 4], ['bpSrcToWorld', 2], ['bpRunsFromPixels', 2],
   ['bpChargesInfo', 3], ['bpInjectMove', 4], ['bpInjectSpace', 3],
-  ['bpCurSelIdx', 3], ['bpEnsureColor', 2], ['bpStroke', 2], ['bpEngine', 2],
+  ['bpCurSelIdx', 3], ['bpEnsureColor', 3], ['bpStroke', 2], ['bpEngine', 2],
   ['bpAbort', 8], ['bpPrimary', 2], ['bpSecondary', 3], ['syncBpBtns', 11],
   ['bpStartBox', 2], ['bpBoxCleanup', 6], ['bpBuildPlan', 2], ['bpPlanReady', 2],
   ['bpPreflight', 2], ['BP_STEP_PX', 2], ['BP_STEP_MS', 2],
   ['BP_STROKE_MS', 2], ['wpAC-bp', 7], ['wpAC-bpx', 3], ['bpBoxEl', 5],
-  ['BP.phase', 22], ['BP.msg', 13], ['BP.ri', 9], ['BP.painted', 4],
+  ['BP.phase', 25], ['BP.msg', 13], ['BP.ri', 9], ['BP.painted', 4],
   ['BP.missed', 5], ['ST.lastMapMove', 7],
   // v2.7.1 涂不上自动跳色（颜料按色分库存 remainingColorCounts）
   ['bpSkipColor', 3], ['BP.skippedRuns', 4], ['BP.streakSkips', 5], ['bpSleep', 11],
