@@ -653,7 +653,7 @@ console.log('== E4: persist 后迁移兜底（30s 窗口取最新 updatedAt） =
 // 且 ±1120 搜索下海洋/涂鸦噪声峰 36% 轻松越过 0.12 阈值（参照层被平移到假峰/屏幕外）。
 
 console.log('== E5: v2.5.3 源码一致 ==');
-check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
+check("版本 2.7.4", SRC.includes("// @version      2.7.5"));
 check('网格缓存字段 ST.paintGrid', SRC.includes('paintGrid: null'));
 check('调色板索引表 paintIdxMap', SRC.includes('function paintIdxMap()'));
 check('网格查询 gridAt', SRC.includes('function gridAt(G, wx, wy)'));
@@ -988,7 +988,7 @@ console.log('== E9: 容差匹配与放宽守门 ==');
 // ================= v2.6.0 颜色风格自动识别（实测官方颜色设置组合择优） =================
 console.log('== E10: 风格识别——精确吻合率评分与择优 ==');
 // 源码断言：识别只在编辑会话、非强制采纳时启动；精确命中评分；双重阈值择优
-check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
+check("版本 2.7.4", SRC.includes("// @version      2.7.5"));
 check('识别入口仅编辑会话且非强制采纳（有 G）', SRC.includes('if (editMode && !forced && G) detectColorStyle(tpl, best, G,'));
 check('强制采纳路径不识别（G=null）', SRC.includes('acceptCalib(tplF, f.best, f.stat, f.mFull, f.editMode, true, null)'));
 check('styleScan 精确命中（v<64 且 v===pi；129+/255 编码必不算）', SRC.includes('if (v < 64 && v === pi) exact++;'));
@@ -1087,7 +1087,7 @@ function styleScanSim(tplS, tilesS, dx, dy, Gs, ov) {
 
 console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
+  check("版本 2.7.4", SRC.includes("// @version      2.7.5"));
   check('HUD 面板 touch-action:none（挡掉面板上的浏览器滚动手势）', SRC.includes('cursor:move;touch-action:none;'));
   check('HUD 拖动抽 hudDragPos（鼠标/触摸同一位置更新）', SRC.includes('function hudDragPos(x, y) {'));
   check('HUD 拖动抽 hudDragStart（按钮区排除共用）', SRC.includes('function hudDragStart(cx, cy, target) {'));
@@ -1135,12 +1135,12 @@ console.log('== E11: 移动端触摸拖动——HUD 面板与地图视图 ==');
 
 console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 + 拟人引擎 ==');
 {
-  check("版本 2.7.4", SRC.includes("// @version      2.7.4"));
+  check("版本 2.7.4", SRC.includes("// @version      2.7.5"));
   // ---- 安全链路（核心）：官方在 map 的 click/pointerdown/touchstart 检查 isTrusted，
   // 合成事件会置 automatedClicks 进 pawtect token。引擎只允许两条注入：window mousemove
   // （官方无 isTrusted 检查）+ document keydown/keyup(Space)（官方无 isTrusted 检查）。
   check('注入只有 mousemove 与 Space 键（不碰官方三个 isTrusted 检查点）',
-    SRC.includes("document.body.dispatchEvent(new MouseEvent('mousemove', {") &&
+    SRC.includes("var ev = new MouseEvent('mousemove', {") &&
     SRC.includes("document.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {"));
   check('注入 mousemove 带 buttons:1（官方右键检查 e.buttons&2 不误入擦除）',
     SRC.includes('bubbles: true, cancelable: true, view: uw, clientX: x, clientY: y, buttons: 1'));
@@ -1407,6 +1407,68 @@ console.log('== E12: 框选自动补画——安全注入链路 + 线段分段 +
     SRC.includes("if (el.isConnected && el.getAttribute('aria-pressed') !== 'true') selectColor._lastEl = null;"));
   check('色分组大色先画（减少换色次数）',
     SRC.includes('sort(function (a, b) { return byColor[b].length - byColor[a].length; })'));
+}
+
+console.log('== E13: v2.7.5 空格连画跨色分段 —— 官方线段插值落笔的结构性修复 ==');
+{
+  // 官方实锤（chunk Cjvnvx56）：window 冒泡 mousemove 处理器 (Rt||A(gt))&&n(i,r) 中
+  // n→t→Ie(n,r) 把「上一点→当前点」线段插值逐像素写草稿，全用当前色。快拖跨色边界时
+  // 线段前半段必然用旧色（v2.7.4 同步换色只保证终点像素正确）。
+  check('分段模块存在且默认开启（S.segFix）',
+    SRC.includes('function rtSegIntercept(e)') &&
+    SRC.includes('segFix: o.segFix !== false') &&
+    SRC.includes('segFix: true'));
+  check('拦截走 stopPropagation（官方 window 冒泡 mousemove 收不到原生线段落笔）',
+    /rtSegIntercept[\s\S]{0,3000}?e\.stopPropagation\(\)/.test(SRC));
+  check('分段注入同链路（selectColor + bpInjectMove，官方对 mousemove 不查 isTrusted）',
+    /selectColor\(segs\[s\]\.c\);[\s\S]{0,200}bpInjectMove\(segs\[s\]\.x, segs\[s\]\.y\)/.test(SRC));
+  check('Space 状态跟踪复位点齐全（keyup/blur/contextmenu/pointercancel/hidden，对齐官方 Vt）',
+    SRC.includes("document.addEventListener('keyup', function (e) { if (e.code === 'Space') RT = null; }, true);") &&
+    SRC.includes("window.addEventListener('blur', function () { RT = null; });") &&
+    SRC.includes("document.addEventListener('contextmenu', function () { RT = null; }, true);") &&
+    SRC.includes("document.addEventListener('pointercancel', function () { RT = null; }, true);") &&
+    SRC.includes('if (document.hidden) RT = null;'));
+  check('绘画模式守卫（paletteRoot 不存在不拦——RT 与官方 Rt 漂移时注入不落笔，无害退化）',
+    /rtSegIntercept[\s\S]{0,1200}?paletteRoot\(\)/.test(SRC));
+  check('单色线段放行官方原生（最常见路径零开销零风险）',
+    SRC.includes('if (!segs || segs.length < 2) return false;'));
+  check('左键拖图/Ctrl 拖参照层/补画引擎运行时不介入',
+    SRC.includes('if (ST.dragging || ovDrag || e.ctrlKey || (e.buttons & 1)) return false;') &&
+    SRC.includes("if (BP && (BP.phase === 'run' || BP.phase === 'pause' || BP.phase === 'wait')) return false; // 补画引擎自管分段"));
+  check('keydown 捕获阶段纠正色（官方 keydown 立即涂上一落点，防止已画对像素被旧色涂坏）',
+    /document\.addEventListener\('keydown', function \(e\) \{[\s\S]{0,900}selectColor\(c\); updateHudColor\(c, hit\.rgb, hit\);/.test(SRC));
+  check('注入事件带 wpACInj 防重入标记（mousemove 捕获监听跳过）',
+    SRC.includes('ev.wpACInj = true;') &&
+    SRC.includes('if (e.wpACInj) return;'));
+  check('v2.7.5 补验 _lastWant 门槛（快速跨色后旧补验不得把色强改回本次请求的色）',
+    SRC.includes('selectColor._lastWant = idx;') &&
+    SRC.includes('if (selectColor._lastWant === idx &&'));
+
+  // rtCompressSamples 独立复刻（与脚本逐行同逻辑）
+  function rtCompressSamples(samples) {
+    var segs = [];
+    for (var i = 0; i < samples.length; i++) {
+      var s = samples[i];
+      if (s.c == null) return null;
+      var last = segs.length ? segs[segs.length - 1] : null;
+      if (last && last.c === s.c) { last.x = s.x; last.y = s.y; continue; }
+      segs.push({ c: s.c, x: s.x, y: s.y });
+    }
+    return segs.length ? segs : null;
+  }
+  var S1 = rtCompressSamples([
+    { x: 0, y: 0, c: 5 }, { x: 1, y: 0, c: 5 }, { x: 2, y: 0, c: 19 },
+    { x: 3, y: 0, c: 19 }, { x: 4, y: 0, c: 19 }, { x: 5, y: 0, c: 5 }]);
+  check('跨色线段压缩成 3 段（同色合并，段终点=该色最后一个采样点）',
+    S1.length === 3 && S1[0].c === 5 && S1[0].x === 1 && S1[1].c === 19 && S1[1].x === 4 && S1[2].c === 5 && S1[2].x === 5);
+  check('单色线段压成 1 段 → 调用方放行原生',
+    rtCompressSamples([{ x: 0, y: 0, c: 7 }, { x: 5, y: 3, c: 7 }]).length === 1);
+  check('采样点取不到色（模板外/覆盖图未渲染）→ null 放弃整条分段',
+    rtCompressSamples([{ x: 0, y: 0, c: 7 }, { x: 3, y: 0, c: null }]) === null);
+  check('空采样 → null',
+    rtCompressSamples([]) === null);
+  check('透明色(0)/无效色不可选 → rtCanSelect 拒绝整段（官方连画跨透明区无法跳过）',
+    /function rtCanSelect\(idx\) \{\s*if \(!idx \|\| idx < 1\) return false;/.test(SRC));
 }
 
 console.log('\nRESULT: ' + pass + ' pass, ' + fail + ' fail');
